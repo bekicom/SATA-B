@@ -35,7 +35,7 @@ app.use("/api/parents", parentRoutes); // faqat ota-onalar uchun
 app.use("/api", auth, routes);
 
 // 🔹 Server ishga tushirish
-const PORT = process.env.PORT || 8020;
+const PORT = process.env.PORT || 8057;
 const server = app.listen(PORT, () => {
   console.log(`✅ Server ${PORT} portda ishga tushdi.`);
 });
