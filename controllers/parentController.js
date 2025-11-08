@@ -1,9 +1,11 @@
 const Student = require("../models/studentModel");
 const ExamResult = require("../models/examResultModel");
 const LessonSchedule = require("../models/lessonScheduleModel");
-const Grade = require("../models/gradeModel"); // 🔹 baholar uchun
+const Grade = require("../models/gradeModel");
 const Payment = require("../models/paymentModel");
+const Homework = require("../models/homeworkModel"); // 🟢 YANGI
 const jwt = require("jsonwebtoken");
+const moment = require("moment");
 
 const generateParentToken = (guardianPhoneNumber) => {
   return jwt.sign(
@@ -23,16 +25,14 @@ exports.parentLogin = async (req, res) => {
         .json({ message: "Telefon raqam kiritilishi shart" });
     }
 
-    // Shu raqam bo‘yicha farzandlarni qidiramiz
     const children = await Student.find({ guardianPhoneNumber });
 
     if (!children || children.length === 0) {
       return res
         .status(404)
-        .json({ message: "Bu raqamga bog‘langan farzand topilmadi" });
+        .json({ message: "Bu raqamga bog'langan farzand topilmadi" });
     }
 
-    // ✅ Token yaratamiz
     const token = generateParentToken(guardianPhoneNumber);
 
     res.json({
@@ -58,7 +58,7 @@ exports.parentLogin = async (req, res) => {
 
 exports.getMyChildren = async (req, res) => {
   try {
-    const { guardianPhoneNumber } = req.user; // parentAuth dan kelgan
+    const { guardianPhoneNumber } = req.user;
 
     if (!guardianPhoneNumber) {
       return res.status(404).json({
@@ -69,12 +69,12 @@ exports.getMyChildren = async (req, res) => {
     }
 
     const children = await Student.find({ guardianPhoneNumber })
-      .populate("groupId", "name number") // guruh ma’lumotini qo‘shib berish
-      .populate("schoolId", "name address") // maktab ma’lumotini qo‘shib berish
+      .populate("groupId", "name number")
+      .populate("schoolId", "name address")
       .select("firstName lastName groupId schoolId");
 
     res.json({
-      message: "Farzandlar ro‘yxati",
+      message: "Farzandlar ro'yxati",
       variant: "success",
       innerData: children,
     });
@@ -88,13 +88,11 @@ exports.getMyChildren = async (req, res) => {
   }
 };
 
-// Ota-ona farzandining baholarini ko‘rishi
 exports.getChildGrades = async (req, res) => {
   try {
     const { studentId } = req.params;
-    const { date } = req.query; // YYYY-MM-DD
+    const { date } = req.query;
 
-    // Studentni topamiz
     const student = await Student.findById(studentId).populate(
       "groupId",
       "name number"
@@ -103,12 +101,10 @@ exports.getChildGrades = async (req, res) => {
       return res.status(404).json({ message: "Student topilmadi" });
     }
 
-    // Guruhdagi darslar
     const lessons = await LessonSchedule.find({ groupId: student.groupId._id })
       .populate("subjectId", "name")
       .lean();
 
-    // Sana filterini qo‘llash
     let gradeQuery = { studentId };
     if (date) {
       const start = new Date(date);
@@ -144,7 +140,7 @@ exports.getChildGrades = async (req, res) => {
         firstName: student.firstName,
         lastName: student.lastName,
       },
-      grades: data.filter((d) => !date || d.grade !== null), // agar date berilsa faqat bahosi borlarini qaytaradi
+      grades: data.filter((d) => !date || d.grade !== null),
     });
   } catch (error) {
     console.error("getChildGrades error:", error);
@@ -152,7 +148,6 @@ exports.getChildGrades = async (req, res) => {
   }
 };
 
-// Bugungi darslar (farzandlar uchun)
 exports.getTodayLessonsForChildren = async (req, res) => {
   try {
     const { guardianPhoneNumber } = req.user;
@@ -172,7 +167,6 @@ exports.getTodayLessonsForChildren = async (req, res) => {
       return res.json({ message: "Farzandlar topilmadi", data: [] });
     }
 
-    // ✅ Sana -> hafta kuni
     const days = [
       "yakshanba",
       "dushanba",
@@ -184,7 +178,7 @@ exports.getTodayLessonsForChildren = async (req, res) => {
     ];
     const selectedDate = date ? new Date(date) : new Date();
     if (isNaN(selectedDate)) {
-      return res.status(400).json({ message: "Noto‘g‘ri sana formati" });
+      return res.status(400).json({ message: "Noto'g'ri sana formati" });
     }
     const dayName = days[selectedDate.getDay()];
 
@@ -221,17 +215,15 @@ exports.getTodayLessonsForChildren = async (req, res) => {
   }
 };
 
-// Ota-ona farzandlarining to‘lovlarini ko‘rishi
 exports.getChildrenPayments = async (req, res) => {
   try {
-    const { guardianPhoneNumber } = req.user; // parentAuth dan keladi
+    const { guardianPhoneNumber } = req.user;
     if (!guardianPhoneNumber) {
       return res
         .status(400)
         .json({ message: "Ota-ona telefon raqami topilmadi" });
     }
 
-    // Farzandlarni olish
     const children = await Student.find({ guardianPhoneNumber })
       .populate("groupId", "name number")
       .lean();
@@ -242,7 +234,6 @@ exports.getChildrenPayments = async (req, res) => {
 
     const data = [];
     for (let child of children) {
-      // Shu studentning to‘lovlari
       const payments = await Payment.find({ user_id: child._id })
         .sort({ createdAt: -1 })
         .lean();
@@ -256,11 +247,10 @@ exports.getChildrenPayments = async (req, res) => {
           month: p.payment_month,
           date: p.payment_date,
           status:
-            p.payment_quantity >= child.monthlyFee ? "To‘langan" : "Qisman",
+            p.payment_quantity >= child.monthlyFee ? "To'langan" : "Qisman",
         };
       });
 
-      // Qarzdorlik hisoblash
       const remainingDebt =
         child.monthlyFee > totalPaid ? child.monthlyFee - totalPaid : 0;
 
@@ -281,7 +271,7 @@ exports.getChildrenPayments = async (req, res) => {
     }
 
     res.json({
-      message: "Farzand to‘lovlari",
+      message: "Farzand to'lovlari",
       data,
     });
   } catch (error) {
@@ -299,7 +289,6 @@ exports.getChildrenExamResults = async (req, res) => {
         .json({ message: "Ota-ona telefon raqami topilmadi" });
     }
 
-    // Farzandlarni topish
     const children = await Student.find({ guardianPhoneNumber }).lean();
     if (!children.length) {
       return res.json({ message: "Farzandlar topilmadi", data: [] });
@@ -344,3 +333,167 @@ exports.getChildrenExamResults = async (req, res) => {
     res.status(500).json({ message: "Server xatosi", error: error.message });
   }
 };
+
+exports.getChildrenDebts = async (req, res) => {
+  try {
+    const { guardianPhoneNumber } = req.user;
+    if (!guardianPhoneNumber) {
+      return res
+        .status(400)
+        .json({ message: "Ota-ona telefon raqami topilmadi" });
+    }
+
+    const children = await Student.find({ guardianPhoneNumber })
+      .populate("groupId", "name number")
+      .lean();
+
+    if (!children.length) {
+      return res.json({ message: "Farzandlar topilmadi", data: [] });
+    }
+
+    const data = [];
+
+    for (let child of children) {
+      const admissionDate = moment(child.admissionDate);
+      const currentDate = moment();
+
+      const payments = await Payment.find({ user_id: child._id }).lean();
+
+      const paymentMap = {};
+      payments.forEach((payment) => {
+        if (!paymentMap[payment.payment_month]) {
+          paymentMap[payment.payment_month] = 0;
+        }
+        paymentMap[payment.payment_month] += payment.payment_quantity;
+      });
+
+      const debts = [];
+      let totalDebt = 0;
+      let tempDate = admissionDate.clone();
+
+      while (tempDate.isSameOrBefore(currentDate, "month")) {
+        const monthKey = tempDate.format("MM-YYYY");
+        const paidAmount = paymentMap[monthKey] || 0;
+        const debtAmount = child.monthlyFee - paidAmount;
+
+        if (debtAmount > 0) {
+          debts.push({
+            month: monthKey,
+            monthName: getMonthName(tempDate.format("MM")),
+            year: tempDate.format("YYYY"),
+            monthlyFee: child.monthlyFee,
+            paidAmount: paidAmount,
+            debtAmount: debtAmount,
+          });
+          totalDebt += debtAmount;
+        }
+
+        tempDate.add(1, "month");
+      }
+
+      data.push({
+        student: {
+          id: child._id,
+          firstName: child.firstName,
+          lastName: child.lastName,
+          group: child.groupId?.name || null,
+          admissionDate: child.admissionDate,
+        },
+        monthlyFee: child.monthlyFee,
+        totalDebt: totalDebt,
+        debts: debts,
+        debtMonthsCount: debts.length,
+      });
+    }
+
+    res.json({
+      message: "Farzand qarzdorliklari",
+      data,
+    });
+  } catch (error) {
+    console.error("getChildrenDebts error:", error);
+    res.status(500).json({ message: "Server xatosi", error: error.message });
+  }
+};
+
+// 🟢 YANGI: Farzandning uyga vazifalarini olish
+exports.getChildHomework = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { guardianPhoneNumber } = req.user;
+
+    // 1. Studentni topish va validatsiya
+    const student = await Student.findById(studentId)
+      .populate("groupId", "name number")
+      .lean();
+
+    if (!student) {
+      return res.status(404).json({ message: "Student topilmadi" });
+    }
+
+    // 2. Bu student ota-onaga tegishli ekanligini tekshirish
+    if (student.guardianPhoneNumber !== guardianPhoneNumber) {
+      return res.status(403).json({
+        message: "Bu farzandning ma'lumotlarini ko'rishga ruxsatingiz yo'q",
+      });
+    }
+
+    // 3. Student guruhiga tegishli barcha uyga vazifalarni olish
+    const homeworks = await Homework.find({ groupId: student.groupId._id })
+      .populate("subjectId", "name")
+      .populate("teacherId", "firstName lastName")
+      .populate("lessonId", "day lessonNumber")
+      .sort({ createdAt: -1 }) // eng yangisidan boshlab
+      .lean();
+
+    // 4. Response formatini to'g'rilash
+    const formattedHomeworks = homeworks.map((hw) => ({
+      id: hw._id,
+      title: hw.title,
+      description: hw.description,
+      subject: hw.subjectId?.name || "Noma'lum",
+      teacher: hw.teacherId
+        ? `${hw.teacherId.firstName} ${hw.teacherId.lastName}`
+        : "Noma'lum",
+      lesson: {
+        day: hw.lessonId?.day || "Noma'lum",
+        lessonNumber: hw.lessonId?.lessonNumber || null,
+      },
+      assignedDate: hw.createdAt,
+    }));
+
+    res.json({
+      message: "Farzand uyga vazifalari",
+      student: {
+        id: student._id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        group: `${student.groupId.number}-${student.groupId.name}`,
+      },
+      totalHomeworks: formattedHomeworks.length,
+      homeworks: formattedHomeworks,
+    });
+  } catch (error) {
+    console.error("getChildHomework error:", error);
+    res.status(500).json({ message: "Server xatosi", error: error.message });
+  }
+};
+
+// Helper function
+function getMonthName(monthNumber) {
+  const months = {
+    "01": "Yanvar",
+    "02": "Fevral",
+    "03": "Mart",
+    "04": "Aprel",
+    "05": "May",
+    "06": "Iyun",
+    "07": "Iyul",
+    "08": "Avgust",
+    "09": "Sentabr",
+    10: "Oktabr",
+    11: "Noyabr",
+    12: "Dekabr",
+  };
+  return months[monthNumber] || "Noma'lum";
+}

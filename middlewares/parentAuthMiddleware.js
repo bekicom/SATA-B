@@ -20,12 +20,10 @@ const parentAuth = (req, res, next) => {
     next();
   } catch (error) {
     console.error("Parent auth error:", error.message);
-    return res
-      .status(401)
-      .json({
-        message: "Token noto‘g‘ri yoki muddati tugagan",
-        error: error.message,
-      });
+    return res.status(401).json({
+      message: "Token noto‘g‘ri yoki muddati tugagan",
+      error: error.message,
+    });
   }
 };
 

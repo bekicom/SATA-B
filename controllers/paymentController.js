@@ -9,6 +9,7 @@ exports.createPayment = async (req, res) => {
     const date = moment().format("YYYY-MM-DD");
     const { user_id, payment_quantity, payment_month, payment_type } = req.body;
     const { schoolId } = req.user;
+
     const monthName = (month) => {
       switch (month) {
         case "01":
@@ -57,6 +58,27 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ message: "Guruh topilmadi" });
     }
 
+    // 🟢 O'quvchining qabul qilingan sanasini tekshirish
+    const studentAdmissionDate = moment(student.admissionDate).format(
+      "MM-YYYY"
+    );
+    const currentPaymentMonth = moment(payment_month, "MM-YYYY").format(
+      "MM-YYYY"
+    );
+
+    // 🟢 Agar to'lov oyi qabul oyidan oldingi oy bo'lsa, xato qaytarish
+    if (
+      moment(currentPaymentMonth, "MM-YYYY").isBefore(
+        moment(studentAdmissionDate, "MM-YYYY")
+      )
+    ) {
+      return res.status(400).json({
+        message: `Talaba ${monthName(
+          studentAdmissionDate.slice(0, 2)
+        )} oyidan boshlab qabul qilingan. Oldingi oylar uchun to'lov qila olmaysiz.`,
+      });
+    }
+
     const previousPayments = await paymentModel.find({
       user_id: student._id,
     });
@@ -73,7 +95,16 @@ exports.createPayment = async (req, res) => {
       .subtract(1, "month")
       .format("MM-YYYY");
 
-    if (paymentMap[previousMonth] < monthlyFee) {
+    // 🟢 Faqat qabul qilingan oydan keyin qarzdorlikni tekshirish
+    const isPreviousMonthAfterAdmission = moment(
+      previousMonth,
+      "MM-YYYY"
+    ).isSameOrAfter(moment(studentAdmissionDate, "MM-YYYY"));
+
+    if (
+      isPreviousMonthAfterAdmission &&
+      paymentMap[previousMonth] < monthlyFee
+    ) {
       return res.status(400).json({
         message: `${monthName(
           previousMonth.slice(0, 2)
@@ -120,6 +151,7 @@ exports.createPayment = async (req, res) => {
       .json({ message: "Serverda xatolik yuz berdi", error: err.message });
   }
 };
+
 exports.getPayments = async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -177,17 +209,12 @@ exports.getPayments = async (req, res) => {
         (type) => type === "bankshot"
       ).length;
 
-      // 🟣 Eng ko‘p ishlatilgan to‘lov turini aniqlash
-      const counts = {
-        cash: cashCount,
-        card: cardCount,
-        bankshot: bankCount,
-      };
+      const counts = { cash: cashCount, card: cardCount, bankshot: bankCount };
       const dominantType = Object.keys(counts).reduce((a, b) =>
         counts[a] > counts[b] ? a : b
       );
 
-      payment.payment_type = dominantType; // eng ko‘p ishlatilgan tur
+      payment.payment_type = dominantType;
       delete payment.payment_types;
     });
 
@@ -201,7 +228,6 @@ exports.getPayments = async (req, res) => {
       let totalPaid = 0;
       studentPayments.forEach((p) => (totalPaid += p.payment_quantity));
       if (totalPaid >= payment.student_monthlyFee) {
-        // student'ning monthlyFee bilan solishtirish
         filteredPayments.push(payment);
       }
     }
@@ -218,7 +244,7 @@ exports.getDebts = async (req, res) => {
   try {
     const { schoolId } = req.user;
     const students = await studentModel
-      .find({ schoolId, isActive: true }) // 🔹 faqat faol studentlar
+      .find({ schoolId, isActive: true })
       .populate("groupId");
 
     if (!students || students.length === 0) {
@@ -249,7 +275,6 @@ exports.getDebts = async (req, res) => {
         let paymentMonth = new Date(admissionDate);
         const payments = await paymentModel.find({ user_id });
 
-        // Consolidate payments by month
         const consolidatedPayments = payments.reduce((acc, payment) => {
           const key = payment.payment_month;
           if (!acc[key]) {
@@ -312,9 +337,6 @@ exports.getDebts = async (req, res) => {
   }
 };
 
-
-
-
 exports.getPaymentLog = async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -353,18 +375,45 @@ exports.checkDebtStatus = async (req, res) => {
       return res.status(404).json({ message: "Talaba topilmadi" });
     }
 
-    // Agar student faol bo‘lmasa, qarzdor hisoblamaymiz
     if (!student.isActive) {
       return res.status(200).json({
         message: "",
         debt: false,
       });
     }
+
     const studentAdmissionDate = moment(student.admissionDate).format(
       "MM-YYYY"
     );
 
+    // 🟢 Agar tanlangan oy qabul qilingan oydan oldingi oy bo'lsa
+    if (
+      moment(paymentMonth, "MM-YYYY").isBefore(
+        moment(studentAdmissionDate, "MM-YYYY")
+      )
+    ) {
+      return res.status(200).json({
+        message: "Talaba bu oyda hali qabul qilinmagan",
+        debt: true,
+        invalid_month: true,
+      });
+    }
+
+    // 🟢 Agar tanlangan oy qabul qilingan oy bo'lsa, qarzdorlik yo'q
     if (paymentMonth === studentAdmissionDate) {
+      return res.status(200).json({
+        message: "",
+        debt: false,
+      });
+    }
+
+    // 🟢 Oldingi oy qabul qilingan oydan oldingi oy bo'lsa, qarzdorlik tekshirilmaydi
+    const isPreviousMonthBeforeAdmission = moment(
+      previousMonth,
+      "MM-YYYY"
+    ).isBefore(moment(studentAdmissionDate, "MM-YYYY"));
+
+    if (isPreviousMonthBeforeAdmission) {
       return res.status(200).json({
         message: "",
         debt: false,
@@ -533,7 +582,7 @@ exports.editPayment = async (req, res) => {
     }
     const isMatch = school.extraPassword === password;
     if (!isMatch) {
-      return res.status(400).json({ ok: false, message: "Parol noto‘g‘ri" });
+      return res.status(400).json({ ok: false, message: "Parol noto'g'ri" });
     }
     const payment = await paymentModel.findByIdAndUpdate(id, req.body, {
       new: true,
@@ -560,7 +609,7 @@ exports.deletePayment = async (req, res) => {
     }
     const isMatch = school.extraPassword === password;
     if (!isMatch) {
-      return res.status(400).json({ ok: false, message: "Parol noto‘g‘ri" });
+      return res.status(400).json({ ok: false, message: "Parol noto'g'ri" });
     }
 
     const payment = await paymentModel.findByIdAndDelete(id);
@@ -570,7 +619,7 @@ exports.deletePayment = async (req, res) => {
 
     res
       .status(200)
-      .json({ ok: true, message: "To‘lov muvaffaqiyatli o‘chirildi" });
+      .json({ ok: true, message: "To'lov muvaffaqiyatli o'chirildi" });
   } catch (err) {
     console.error("Xatolik:", err.message);
     return res.status(500).json({ message: "Serverda xatolik" });
