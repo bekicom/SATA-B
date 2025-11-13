@@ -193,19 +193,46 @@ exports.getTodayLessonsForChildren = async (req, res) => {
         .populate("teacherId", "firstName lastName")
         .lean();
 
+      const lessonsWithHomework = await Promise.all(
+        lessons.map(async (lesson) => {
+          // Shu lesson uchun uyga vazifalarni olish
+          const homeworks = await Homework.find({
+            lessonId: lesson._id,
+          })
+            .populate("subjectId", "name")
+            .populate("teacherId", "firstName lastName")
+            .sort({ createdAt: -1 })
+            .lean();
+
+          const formattedHomeworks = homeworks.map((hw) => ({
+            id: hw._id,
+            title: hw.title,
+            description: hw.description,
+            subject: hw.subjectId?.name || "Noma'lum",
+            teacher: hw.teacherId
+              ? `${hw.teacherId.firstName} ${hw.teacherId.lastName}`
+              : "Noma'lum",
+            assignedDate: hw.createdAt,
+          }));
+
+          return {
+            subject: lesson.subjectId?.name,
+            lessonNumber: lesson.lessonNumber,
+            teacher: `${lesson.teacherId?.firstName} ${lesson.teacherId?.lastName}`,
+            homeworks: formattedHomeworks,
+          };
+        })
+      );
+
       result.push({
         student: `${child.firstName} ${child.lastName}`,
         group: `${child.groupId.number}-${child.groupId.name}`,
-        lessons: lessons.map((l) => ({
-          subject: l.subjectId?.name,
-          lessonNumber: l.lessonNumber,
-          teacher: `${l.teacherId?.firstName} ${l.teacherId?.lastName}`,
-        })),
+        lessons: lessonsWithHomework,
       });
     }
 
     res.json({
-      message: "Farzand darslari",
+      message: "Farzand darslari va uyga vazifalari",
       date: selectedDate.toISOString().split("T")[0],
       data: result,
     });
@@ -214,6 +241,7 @@ exports.getTodayLessonsForChildren = async (req, res) => {
     res.status(500).json({ message: "Server xatosi", error: error.message });
   }
 };
+
 
 exports.getChildrenPayments = async (req, res) => {
   try {

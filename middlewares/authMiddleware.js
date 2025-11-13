@@ -2,28 +2,44 @@ const jwt = require("../utils/token.helper");
 const response = require("../utils/response.helper");
 
 async function auth(req, res, next) {
-  let token, msg, data;
-  token = req?.headers?.authorization?.split(" ").pop() || null;
-  const publicPath = [
-    "/schools/",
+  const publicPaths = [
     "/schools",
-    "/schools/login",
     "/schools/",
+    "/schools/login",
     "/schools/login/",
     "/user/login",
     "/user/login/",
     "/teachers/login",
   ];
-  if (publicPath.includes(req.path)) return next();
-  msg = "Вы не авторизованы для доступа к этому ресурсу";
-  if (!token) return response.unauthorized(res, msg);
-  data = await jwt.verify(token);
-  msg = `Ваша сессия истекла, пожалуйста, авторизуйтесь заново`;
-  if (!data) return response.unauthorized(res, msg);
+
+  // Public routelarni tekshirish
+  if (publicPaths.some((p) => req.path.startsWith(p))) {
+    return next();
+  }
+
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) {
+    return response.unauthorized(
+      res,
+      "Вы не авторизованы для доступа к этому ресурсу"
+    );
+  }
+
+  const token = header.split(" ")[1];
+
+  // Tokenni tekshirish
+  let data;
+  try {
+    data = await jwt.verify(token); // Agar helper promisefy qilingan bo‘lsa OK
+  } catch (err) {
+    return response.unauthorized(
+      res,
+      "Ваша сессия истекла, пожалуйста, авторизуйтесь заново"
+    );
+  }
 
   req.user = data;
-
-  return next();
+  next();
 }
 
 module.exports = auth;

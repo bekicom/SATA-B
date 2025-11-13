@@ -1,32 +1,19 @@
 const jwt = require("jsonwebtoken");
 const secret = process.env.JWT_SECRET;
 
-
-
-
 class jwtHelper {
   // Generate token
-  async generate(data, expiresIn = "30d") {
-    return new Promise((resolve, reject) => {
-      try {
-        const token = jwt.sign(data, secret, { expiresIn });
-        return resolve(token);
-      } catch (error) {
-        return reject(error);
-      }
-    });
+  generate(data, expiresIn = "30d") {
+    return jwt.sign(data, secret, { expiresIn });
   }
 
   // Verify token
-  async verify(token) {
-    return new Promise((resolve, reject) => {
-      try {
-        const verify = jwt.verify(token, secret);
-        return resolve(verify);
-      } catch (error) {
-        return reject(error);
-      }
-    });
+  verify(token) {
+    try {
+      return jwt.verify(token, secret);
+    } catch (error) {
+      return false; // ❗ xatoni tashlamaymiz
+    }
   }
 }
 

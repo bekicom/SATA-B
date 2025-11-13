@@ -169,16 +169,17 @@ router.post("/davomat/teacher", addTeacherDavomat);
 router.get("/davomat/teacher", getTeacherDavomat);
 
 // ---------- Payments ----------
-router.post("/payments", createPayment);
-router.get("/payments", getPayments);
-router.get("/payments/debts", getDebts);
-router.get("/payments/summary", getMonthlyPaymentSummary);
-router.get("/payments/summary/month", getMonthlyPaymentSummaryForGivenMonth);
-router.get("/payments/logs", getPaymentLog);
-router.post("/payments/check", checkDebtStatus);
-router.get("/payments/:user_id", getPaymentByUserId);
-router.put("/payments/:id", editPayment);
-router.delete("/payments/:id", deletePayment);
+// ---------- Payments ----------
+router.post("/payments", auth, createPayment);
+router.get("/payments", auth, getPayments);
+router.get("/payments/debts", auth, getDebts);
+router.get("/payments/summary", auth, getMonthlyPaymentSummary);
+router.get("/payments/summary/month", auth, getMonthlyPaymentSummaryForGivenMonth);
+router.get("/payments/logs", auth, getPaymentLog);
+router.post("/payments/check", auth, checkDebtStatus); // ✅ auth qo'shildi
+router.get("/payments/:user_id", auth, getPaymentByUserId);
+router.put("/payments/:id", auth, editPayment);
+router.delete("/payments/:id", auth, deletePayment);
 
 // ---------- Harajat ----------
 router.post("/expenses", createHarajat);
