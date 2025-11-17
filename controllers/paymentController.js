@@ -11,36 +11,24 @@ exports.createPayment = async (req, res) => {
     const { schoolId } = req.user;
 
     const monthName = (month) => {
-      switch (month) {
-        case "01":
-          return "Yanvar";
-        case "02":
-          return "Fevral";
-        case "03":
-          return "Mart";
-        case "04":
-          return "Aprel";
-        case "05":
-          return "May";
-        case "06":
-          return "Iyun";
-        case "07":
-          return "Iyul";
-        case "08":
-          return "Avgust";
-        case "09":
-          return "Sentabr";
-        case "10":
-          return "Oktabr";
-        case "11":
-          return "Noyabr";
-        case "12":
-          return "Dekabr";
-        default:
-          return "Noma'lum oy";
-      }
+      const map = {
+        "01": "Yanvar",
+        "02": "Fevral",
+        "03": "Mart",
+        "04": "Aprel",
+        "05": "May",
+        "06": "Iyun",
+        "07": "Iyul",
+        "08": "Avgust",
+        "09": "Sentabr",
+        10: "Oktabr",
+        11: "Noyabr",
+        12: "Dekabr",
+      };
+      return map[month] || "Noma'lum oy";
     };
 
+    // 🔹 1) Talabani olish
     const student = await studentModel.findById(user_id);
     if (!student) {
       return res.status(404).json({ message: "Talaba topilmadi" });
@@ -48,9 +36,9 @@ exports.createPayment = async (req, res) => {
 
     const monthlyFee = student?.monthlyFee;
     if (!monthlyFee) {
-      return res
-        .status(404)
-        .json({ message: "Talabaning oylik to'lovi aniqlanmagan" });
+      return res.status(404).json({
+        message: "Talabaning oylik to'lovi aniqlanmagan",
+      });
     }
 
     const userGroup = await groupModel.findById(student.groupId);
@@ -58,69 +46,88 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ message: "Guruh topilmadi" });
     }
 
-    // 🟢 O'quvchining qabul qilingan sanasini tekshirish
-    const studentAdmissionDate = moment(student.admissionDate).format(
+    // 🔹 2) Qabul oyidan oldin to‘lov bloklash
+    const studentAdmissionMonth = moment(student.admissionDate).format(
       "MM-YYYY"
     );
-    const currentPaymentMonth = moment(payment_month, "MM-YYYY").format(
-      "MM-YYYY"
-    );
+    const selectedMonth = moment(payment_month, "MM-YYYY").format("MM-YYYY");
 
-    // 🟢 Agar to'lov oyi qabul oyidan oldingi oy bo'lsa, xato qaytarish
     if (
-      moment(currentPaymentMonth, "MM-YYYY").isBefore(
-        moment(studentAdmissionDate, "MM-YYYY")
+      moment(selectedMonth, "MM-YYYY").isBefore(
+        moment(studentAdmissionMonth, "MM-YYYY")
       )
     ) {
       return res.status(400).json({
         message: `Talaba ${monthName(
-          studentAdmissionDate.slice(0, 2)
-        )} oyidan boshlab qabul qilingan. Oldingi oylar uchun to'lov qila olmaysiz.`,
+          studentAdmissionMonth.slice(0, 2)
+        )} oyidan boshlab o‘qishga qabul qilingan. Oldingi oylar uchun to‘lov qilinmaydi.`,
       });
     }
 
-    const previousPayments = await paymentModel.find({
-      user_id: student._id,
+    // ────────────────────────────────────────────────────────────────
+    // 🔥 3) BU YERGA payForMonth-dagi LIMIT TEKSHIRUVINI QO‘SHDIM
+    //     → OY BO‘YICHA KO‘P TO‘LOV QABUL QILMASLIK
+    // ────────────────────────────────────────────────────────────────
+
+    const existingPayments = await paymentModel.find({
+      user_id,
+      payment_month: selectedMonth,
     });
 
-    const paymentMap = {};
-    previousPayments.forEach((payment) => {
-      if (!paymentMap[payment.payment_month]) {
-        paymentMap[payment.payment_month] = 0;
-      }
-      paymentMap[payment.payment_month] += payment.payment_quantity;
-    });
+    let alreadyPaid = 0;
+    existingPayments.forEach((p) => (alreadyPaid += p.payment_quantity));
 
+    // Agar student oyligi = 500 000 bo‘lsa
+    // oldin 300 000 to‘lagan → endi 250 000 to‘lashga urinayotgan bo‘lsa xato
+    if (alreadyPaid + payment_quantity > monthlyFee) {
+      return res.status(400).json({
+        message:
+          `${monthName(
+            selectedMonth.slice(0, 2)
+          )} oyi uchun oylik summadan ortiq to'lov qabul qilinmaydi. ` +
+          `Limit: ${monthlyFee}. Siz oldin ${alreadyPaid} so‘m to‘lagansiz.`,
+        limitExceeded: true,
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 🔚 LIMIT CHECK tugadi — endi to‘lovni qabul qilsa bo‘ladi
+    // ────────────────────────────────────────────────────────────────
+
+    // 🔹 4) Oldingi oydagi qarzdorlikni tekshirish
     const previousMonth = moment(payment_month, "MM-YYYY")
       .subtract(1, "month")
       .format("MM-YYYY");
 
-    // 🟢 Faqat qabul qilingan oydan keyin qarzdorlikni tekshirish
-    const isPreviousMonthAfterAdmission = moment(
-      previousMonth,
-      "MM-YYYY"
-    ).isSameOrAfter(moment(studentAdmissionDate, "MM-YYYY"));
+    const isPrevAfterAdmission = moment(previousMonth, "MM-YYYY").isSameOrAfter(
+      moment(studentAdmissionMonth, "MM-YYYY")
+    );
 
-    if (
-      isPreviousMonthAfterAdmission &&
-      paymentMap[previousMonth] < monthlyFee
-    ) {
-      return res.status(400).json({
-        message: `${monthName(
-          previousMonth.slice(0, 2)
-        )} oyi uchun qarzdorlik bor`,
+    if (isPrevAfterAdmission && previousMonth !== selectedMonth) {
+      const prevPays = await paymentModel.find({
+        user_id: student._id,
+        payment_month: previousMonth,
       });
+
+      let prevTotal = 0;
+      prevPays.forEach((p) => (prevTotal += p.payment_quantity));
+
+      if (prevTotal < monthlyFee) {
+        return res.status(400).json({
+          message: `${monthName(
+            previousMonth.slice(0, 2)
+          )} oyi uchun qarzdorlik mavjud!`,
+          debt_sum: monthlyFee - prevTotal,
+        });
+      }
     }
 
-    const school = await schoolModel.findByIdAndUpdate(schoolId, {
+    // 🔹 5) Maktab byudjetiga qo‘shish
+    await schoolModel.findByIdAndUpdate(schoolId, {
       $inc: { budget: payment_quantity },
     });
-    if (!school) {
-      return res
-        .status(500)
-        .json({ message: "To'lovni amalga oshirishda xatolik yuz berdi" });
-    }
 
+    // 🔹 6) To‘lovni yozish
     const paymentData = {
       user_id: student._id,
       user_fullname: student.firstName + " " + student.lastName,
@@ -133,22 +140,20 @@ exports.createPayment = async (req, res) => {
     };
 
     const newPayment = new paymentModel(paymentData);
-    const savedPayment = await newPayment.save();
-    if (!savedPayment) {
-      return res
-        .status(500)
-        .json({ message: "To'lovni saqlashda xatolik yuz berdi" });
-    }
+    await newPayment.save();
 
     student.payments.push(newPayment._id);
     await student.save();
 
-    res.status(201).json({ message: "To'lov muvaffaqiyatli amalga oshirildi" });
+    return res.status(201).json({
+      message: "To'lov muvaffaqiyatli amalga oshirildi",
+    });
   } catch (err) {
     console.error(err);
-    res
-      .status(500)
-      .json({ message: "Serverda xatolik yuz berdi", error: err.message });
+    res.status(500).json({
+      message: "Serverda xatolik yuz berdi",
+      error: err.message,
+    });
   }
 };
 
@@ -218,20 +223,23 @@ exports.getPayments = async (req, res) => {
       delete payment.payment_types;
     });
 
-    const filteredPayments = [];
-    for (const payment of mergedPaymentsArray) {
-      const studentPayments = await paymentModel.find({
-        user_id: payment.user_id,
-        payment_month: payment.payment_month,
-      });
+    // 🔥 BU FILTERNI O'CHIRISH KERAK - u faqat to'liq to'langanlarni ko'rsatadi
+    // const filteredPayments = [];
+    // for (const payment of mergedPaymentsArray) {
+    //   const studentPayments = await paymentModel.find({
+    //     user_id: payment.user_id,
+    //     payment_month: payment.payment_month,
+    //   });
+    //
+    //   let totalPaid = 0;
+    //   studentPayments.forEach((p) => (totalPaid += p.payment_quantity));
+    //   if (totalPaid >= payment.student_monthlyFee) {
+    //     filteredPayments.push(payment);
+    //   }
+    // }
 
-      let totalPaid = 0;
-      studentPayments.forEach((p) => (totalPaid += p.payment_quantity));
-      if (totalPaid >= payment.student_monthlyFee) {
-        filteredPayments.push(payment);
-      }
-    }
-    res.status(200).json(filteredPayments);
+    // 🔥 BARCHA TO'LOVLARNI QAYTARISH
+    res.status(200).json(mergedPaymentsArray);
   } catch (err) {
     console.log(err);
     res
@@ -291,25 +299,18 @@ exports.getDebts = async (req, res) => {
           ).slice(-2)}-${paymentMonth.getFullYear()}`;
 
           const existingPayment = consolidatedPayments[paymentMonthStr];
+          const paidAmount = existingPayment
+            ? existingPayment.payment_quantity
+            : 0;
 
-          const isAlreadyAdded = finalPayments.some(
-            (payment) =>
-              payment.user_id === user_id &&
-              payment.payment_month === paymentMonthStr
-          );
-
-          if (
-            !isAlreadyAdded &&
-            (!existingPayment || existingPayment.payment_quantity < monthlyFee)
-          ) {
+          // 🔥 ASOSIY O'ZGARISH: Faqat qarzdor talabalarni qo'shish
+          if (paidAmount < monthlyFee) {
             finalPayments.push({
               user_id: user_id,
               user_fullname: `${firstName} ${lastName}`,
               user_group: groupId?.name,
               user_groupId: groupId?._id,
-              payment_quantity: existingPayment
-                ? existingPayment.payment_quantity
-                : 0,
+              payment_quantity: paidAmount,
               payment_month: paymentMonthStr,
               schoolId: schoolId,
               payment_type: existingPayment
@@ -320,6 +321,9 @@ exports.getDebts = async (req, res) => {
                 : new Date(),
               student_monthlyFee: monthlyFee,
               admissionDate: admissionDate,
+              // 🔥 QARZDORLIK MIQDORINI HAM QO'SHAMIZ
+              debt_amount: monthlyFee - paidAmount,
+              is_paid: paidAmount >= monthlyFee, // to'langanligini belgilash
             });
           }
 
@@ -455,57 +459,50 @@ exports.checkDebtStatus = async (req, res) => {
 exports.getMonthlyPaymentSummary = async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const currentYear = moment().year();
-    const allMonths = [];
-    for (let i = 1; i <= 12; i++) {
-      const month = moment()
-        .month(i - 1)
-        .format("MM-YYYY");
-      allMonths.push({
-        date: month,
-        cash: 0,
-        card: 0,
-        bankshot: 0,
-        total: 0,
-      });
-    }
+
+    // 12 oy massivini generatsiya qilish
+    const allMonths = Array.from({ length: 12 }, (_, i) => {
+      const month = moment().month(i).format("MM-YYYY");
+      return { date: month, cash: 0, card: 0, bankshot: 0, total: 0 };
+    });
+
     const result = await paymentModel.aggregate([
-      {
-        $match: { schoolId: schoolId },
-      },
+      { $match: { schoolId } },
       {
         $project: {
           payment_quantity: 1,
           payment_type: 1,
-          payment_month: {
-            $dateToString: { format: "%m-%Y", date: "$createdAt" },
-          },
+          month: { $dateToString: { format: "%m-%Y", date: "$createdAt" } },
         },
       },
       {
         $group: {
-          _id: { month: "$payment_month", type: "$payment_type" },
-          summ: { $sum: "$payment_quantity" },
+          _id: { month: "$month", type: "$payment_type" },
+          sum: { $sum: "$payment_quantity" },
         },
       },
     ]);
 
-    result.forEach((item) => {
-      const found = allMonths.find((m) => m.date === item._id.month);
-      if (found) {
-        if (item._id.type === "cash") found.cash = item.summ;
-        else if (item._id.type === "card") found.card = item.summ;
-        else if (item._id.type === "bankshot") found.bankshot = item.summ;
-        found.total = found.cash + found.card + found.bankshot;
-      }
-    });
+    // Natijalarni joylashtirish
+    for (const item of result) {
+      const target = allMonths.find((m) => m.date === item._id.month);
+      if (!target) continue;
 
-    res.json(allMonths);
+      const t = item._id.type;
+      if (t === "cash") target.cash = item.sum;
+      else if (t === "card") target.card = item.sum;
+      else if (t === "bankshot") target.bankshot = item.sum;
+
+      target.total = target.cash + target.card + target.bankshot;
+    }
+
+    return res.json(allMonths);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 exports.getMonthlyPaymentSummaryForGivenMonth = async (req, res) => {
   try {
@@ -514,62 +511,54 @@ exports.getMonthlyPaymentSummaryForGivenMonth = async (req, res) => {
 
     if (!month || !moment(month, "MM-YYYY", true).isValid()) {
       return res.status(400).json({
-        message: "Invalid or missing 'month' query parameter. Format: MM-YYYY",
+        message: "Invalid or missing 'month'. Required format: MM-YYYY",
       });
     }
 
-    const startOfMonth = moment(month, "MM-YYYY").startOf("month");
-    const endOfMonth = moment(month, "MM-YYYY").endOf("month");
+    const start = moment(month, "MM-YYYY").startOf("month");
+    const end = moment(month, "MM-YYYY").endOf("month");
 
+    // Aggregation
     const result = await paymentModel.aggregate([
       {
         $match: {
-          schoolId: schoolId,
-          createdAt: {
-            $gte: startOfMonth.toDate(),
-            $lte: endOfMonth.toDate(),
-          },
-        },
-      },
-      {
-        $project: {
-          payment_quantity: 1,
-          payment_day: { $dayOfMonth: "$createdAt" },
+          schoolId,
+          createdAt: { $gte: start.toDate(), $lte: end.toDate() },
         },
       },
       {
         $group: {
-          _id: "$payment_day",
-          summ: { $sum: "$payment_quantity" },
+          _id: { $dayOfMonth: "$createdAt" },
+          sum: { $sum: "$payment_quantity" },
         },
       },
-      {
-        $sort: { _id: 1 },
-      },
+      { $sort: { _id: 1 } },
     ]);
 
-    const allDaysInMonth = [];
-    for (let day = 1; day <= endOfMonth.date(); day++) {
-      const date = moment(startOfMonth).date(day).format("DD-MM");
-      allDaysInMonth.push({ date: date, summ: 0 });
+    // Har kuni uchun massiv
+    const daysCount = end.date(); // oy nechta kun
+    const allDays = Array.from({ length: daysCount }, (_, i) => ({
+      date: moment(start)
+        .date(i + 1)
+        .format("DD-MM"),
+      sum: 0,
+    }));
+
+    // To‘ldirish
+    for (const item of result) {
+      const dayIndex = item._id - 1;
+      if (allDays[dayIndex]) {
+        allDays[dayIndex].sum = item.sum;
+      }
     }
 
-    result.forEach((item) => {
-      const index = allDaysInMonth.findIndex(
-        (day) =>
-          day.date === moment(startOfMonth).date(item._id).format("DD-MM")
-      );
-      if (index !== -1) {
-        allDaysInMonth[index].summ = item.summ;
-      }
-    });
-
-    res.json(allDaysInMonth);
+    return res.json(allDays);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 exports.editPayment = async (req, res) => {
   try {
