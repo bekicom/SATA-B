@@ -7,31 +7,33 @@ const addTeacher = async (req, res) => {
   try {
     const { login, password, employeeNo } = req.body;
 
-    // Login unique bo‘lishi shart
-    if (login) {
-      const loginExists = await Teacher.findOne({ login });
-      if (loginExists) {
-        return res.status(400).json({ message: "Bu login allaqachon mavjud" });
-      }
+    // Login va password majburiy
+    if (!login || !password) {
+      return res.status(400).json({
+        message: "Login va parol majburiy",
+      });
     }
 
-    // employeeNo unique bo‘lishi shart
+    // Login unique bo'lishi shart
+    const loginExists = await Teacher.findOne({ login });
+    if (loginExists) {
+      return res.status(400).json({
+        message: "Bu login allaqachon mavjud. Boshqa login tanlang.",
+      });
+    }
+
+    // employeeNo unique bo'lishi shart
     if (employeeNo) {
       const exists = await Teacher.findOne({ employeeNo });
       if (exists) {
-        return res
-          .status(400)
-          .json({ message: "Bu employeeNo allaqachon mavjud" });
+        return res.status(400).json({
+          message: "Bu xodim raqami allaqachon mavjud",
+        });
       }
     }
 
     // Parol hash qilish
-    let hashedPassword = "";
-    if (password) {
-      hashedPassword = await bcrypt.hash(password, 10);
-    } else {
-      return res.status(400).json({ message: "Parol kiritilmadi" });
-    }
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const teacher = new Teacher({
       ...req.body,
@@ -40,12 +42,25 @@ const addTeacher = async (req, res) => {
 
     const saveTeacher = await teacher.save();
 
+    // Parolni response dan olib tashlash
+    const teacherResponse = saveTeacher.toObject();
+    delete teacherResponse.password;
+
     res.status(201).json({
       message: "O'qituvchi muvaffaqiyatli qo'shildi",
-      teacher: saveTeacher,
+      teacher: teacherResponse,
     });
   } catch (error) {
     console.error("Error adding teacher:", error);
+
+    // MongoDB duplicate key xatosini ushlash
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        message: `Bu ${field} allaqachon mavjud`,
+      });
+    }
+
     res.status(500).json({ message: "Server xatosi" });
   }
 };
@@ -55,14 +70,24 @@ const loginTeacher = async (req, res) => {
   try {
     const { login, password } = req.body;
 
+    if (!login || !password) {
+      return res.status(400).json({
+        message: "Login va parol majburiy",
+      });
+    }
+
     const teacher = await Teacher.findOne({ login }).select("+password");
     if (!teacher) {
-      return res.status(400).json({ message: "Login yoki parol noto‘g‘ri" });
+      return res.status(400).json({
+        message: "Login yoki parol noto'g'ri",
+      });
     }
 
     const isMatch = await bcrypt.compare(password, teacher.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Login yoki parol noto‘g‘ri" });
+      return res.status(400).json({
+        message: "Login yoki parol noto'g'ri",
+      });
     }
 
     const token = jwt.sign(
@@ -118,27 +143,31 @@ const updateTeacher = async (req, res) => {
   try {
     const { login, password, employeeNo } = req.body;
 
-    // login unique bo‘lishini tekshirish
+    // login unique bo'lishini tekshirish
     if (login) {
       const existsLogin = await Teacher.findOne({
         login,
         _id: { $ne: req.params.id },
       });
       if (existsLogin) {
-        return res.status(400).json({ message: "Bu login allaqachon mavjud" });
+        return res.status(400).json({
+          message:
+            "Bu login allaqachon boshqa o'qituvchi tomonidan ishlatilmoqda",
+        });
       }
     }
 
-    // employeeNo unique bo‘lishini tekshirish
+    // employeeNo unique bo'lishini tekshirish
     if (employeeNo) {
       const exists = await Teacher.findOne({
         employeeNo,
         _id: { $ne: req.params.id },
       });
       if (exists) {
-        return res
-          .status(400)
-          .json({ message: "Bu employeeNo allaqachon mavjud" });
+        return res.status(400).json({
+          message:
+            "Bu xodim raqami allaqachon boshqa o'qituvchiga biriktirilgan",
+        });
       }
     }
 
@@ -158,22 +187,39 @@ const updateTeacher = async (req, res) => {
       return res.status(404).json({ message: "O'qituvchi topilmadi" });
     }
 
+    // Parolni response dan olib tashlash
+    const teacherResponse = updatedTeacher.toObject();
+    delete teacherResponse.password;
+
     res.json({
       message: "O'qituvchi muvaffaqiyatli yangilandi",
-      teacher: updatedTeacher,
+      teacher: teacherResponse,
     });
   } catch (error) {
     console.error("Error updating teacher:", error);
+
+    // MongoDB duplicate key xatosini ushlash
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        message: `Bu ${field} allaqachon mavjud`,
+      });
+    }
+
     res.status(500).json({ message: "Server xatosi" });
   }
 };
 
-
 // O'qituvchini o'chirish
 const deleteTeacher = async (req, res) => {
   try {
-    await Teacher.findByIdAndDelete(req.params.id);
-    res.json({ message: "O'qituvchi o'chirildi" });
+    const teacher = await Teacher.findByIdAndDelete(req.params.id);
+
+    if (!teacher) {
+      return res.status(404).json({ message: "O'qituvchi topilmadi" });
+    }
+
+    res.json({ message: "O'qituvchi muvaffaqiyatli o'chirildi" });
   } catch (error) {
     console.error("Error deleting teacher:", error);
     res.status(500).json({ message: "Server xatosi" });
