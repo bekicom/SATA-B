@@ -304,8 +304,8 @@ function makeDateOn(baseMoment, hhmmss) {
 
 exports.addStudentDavomat = async (req, res) => {
   try {
-    const { employeeNo } = req.body;
-    const schoolId = req.user.schoolId; // yoki body’dan
+    const { employeeNo, status, date } = req.body;
+    const schoolId = req.user.schoolId;
 
     if (!employeeNo || !schoolId) {
       return res
@@ -319,29 +319,78 @@ exports.addStudentDavomat = async (req, res) => {
       return res.status(404).json({ message: "Talaba topilmadi" });
     }
 
-    // 2) Vaqt va kun
+    // 2) Sana va vaqt
     const now = moment().tz("Asia/Tashkent");
-    const currentTime = now.format("HH:mm:ss");
-    const dateKey = now.format("YYYY-MM-DD");
-    const dateValue = now.clone().startOf("day").toDate();
 
-    // 3) Kun hujjatini yaratish (agar bo‘lmasa)
+    // Frontenddan sana kelsa (qo'lda belgilash) – shuni ishlatamiz,
+    // bo'lmasa hozirgi kun (skaner/qr uchun)
+    const targetMoment = date
+      ? moment.tz(date, "YYYY-MM-DD", "Asia/Tashkent")
+      : now;
+
+    const currentTime = now.format("HH:mm:ss");
+    const dateKey = targetMoment.format("YYYY-MM-DD");
+    const dateValue = targetMoment.clone().startOf("day").toDate();
+
+    // 3) Agar status "kelmadi" bo'lsa – alohida logika
+    if (status === "kelmadi") {
+      let dayDoc = await OquvchiDavomati.findOne({ schoolId, dateKey });
+
+      if (!dayDoc) {
+        dayDoc = new OquvchiDavomati({
+          schoolId,
+          dateKey,
+          date: dateValue,
+          body: [],
+        });
+      }
+
+      // Shu kunda shu talaba bo'yicha yozuv bormi?
+      const idx = dayDoc.body.findIndex(
+        (e) => String(e.student_id) === String(student._id)
+      );
+
+      if (idx >= 0) {
+        // Bor bo'lsa – statusni "kelmadi" ga almashtiramiz
+        dayDoc.body[idx].status = "kelmadi";
+        dayDoc.body[idx].time = dayDoc.body[idx].time || undefined;
+        dayDoc.body[idx].quittedTime = undefined;
+      } else {
+        // Yo'q bo'lsa – yangi yozuv qo'shamiz
+        dayDoc.body.push({
+          student_id: student._id,
+          employeeNo: student.employeeNo,
+          status: "kelmadi",
+        });
+      }
+
+      const saved = await dayDoc.save();
+      return res.status(200).json({
+        success: true,
+        message: "Talaba kelmagan deb belgilandi",
+        data: saved,
+      });
+    }
+
+    // 4) Quyidagi kod – avvalgi "keldi / ketdi" logikasi (QR / skaner uchun)
+
+    // Kun hujjatini yaratish (agar bo‘lmasa)
     await OquvchiDavomati.findOneAndUpdate(
       { schoolId, dateKey },
       { $setOnInsert: { date: dateValue, schoolId, dateKey } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // 4) Shu kunda shu talabaning yozuvlarini olish
+    // Shu kunda shu talabaning yozuvlari
     const dayDoc = await OquvchiDavomati.findOne({ schoolId, dateKey });
     const entries = (dayDoc?.body || []).filter(
       (e) => String(e.student_id) === String(student._id)
     );
 
-    // 🔒 4.1) Anti-double: 1 daqiqa ichida qayta skaner bo‘lmasin
+    // 🔒 Anti-double: 1 daqiqa ichida qayta skaner bo‘lmasin
     if (entries.length > 0) {
       const last = entries[entries.length - 1];
-      const lastActionStr = last.quittedTime || last.time; // oxirgi harakat
+      const lastActionStr = last.quittedTime || last.time;
       const lastAction = makeDateOn(now, lastActionStr);
       const diffSeconds = now.diff(lastAction, "seconds");
       if (diffSeconds < 60) {
@@ -354,11 +403,10 @@ exports.addStudentDavomat = async (req, res) => {
       }
     }
 
-    // 5) Agar ochiq (ketish yozilmagan) yozuv bo‘lsa — chiqishni yozishga urinyapti
+    // Ochiq yozuv bor bo'lsa – chiqish (ketdi)
     const openEntry = entries.find((e) => !e.quittedTime);
 
     if (openEntry) {
-      // ⏳ Chiqish faqat kirishdan 5 daqiqa o‘tgach
       const enteredAt = makeDateOn(now, openEntry.time);
       const passedMinutes = now.diff(enteredAt, "minutes");
       if (passedMinutes < 5) {
@@ -370,7 +418,6 @@ exports.addStudentDavomat = async (req, res) => {
         });
       }
 
-      // ✅ Chiqishni yozamiz
       const updatedExit = await OquvchiDavomati.findOneAndUpdate(
         {
           schoolId,
@@ -393,13 +440,12 @@ exports.addStudentDavomat = async (req, res) => {
 
       if (updatedExit) return res.status(200).json(updatedExit);
 
-      // Ehtiyot chorasi: agar yuqorida yangilanmasa
       return res
         .status(500)
         .json({ success: false, message: "Chiqishni yozib bo‘lmadi" });
     }
 
-    // 6) Aks holda — yangi kirish (keldi) yozuvi
+    // Yangi kirish (keldi)
     const pushResult = await OquvchiDavomati.findOneAndUpdate(
       {
         schoolId,
@@ -420,7 +466,6 @@ exports.addStudentDavomat = async (req, res) => {
 
     if (pushResult) return res.status(201).json(pushResult);
 
-    // Fallback
     return res
       .status(500)
       .json({ success: false, message: "Davomatni yozib bo‘lmadi" });
@@ -429,6 +474,7 @@ exports.addStudentDavomat = async (req, res) => {
     res.status(500).json({ message: "Server xatosi", error: err.message });
   }
 };
+
 
 
 // 📌 Student davomatini olish

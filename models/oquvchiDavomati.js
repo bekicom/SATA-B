@@ -23,8 +23,21 @@ const oquvchiDavomatiSchema = new mongoose.Schema(
           required: true,
         },
         employeeNo: { type: String, required: true },
-        time: { type: String, required: true }, // HH:mm:ss
-        status: { type: String, enum: ["keldi", "ketdi"], required: true },
+
+        // ❗ time faqat "kelmadi" bo'lmagan holatda required
+        time: {
+          type: String, // HH:mm:ss
+          required: function () {
+            return this.status !== "kelmadi";
+          },
+        },
+
+        status: {
+          type: String,
+          enum: ["keldi", "ketdi", "kelmadi"],
+          required: true,
+        },
+
         quittedTime: { type: String },
       },
     ],
