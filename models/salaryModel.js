@@ -3,17 +3,25 @@ const mongoose = require("mongoose");
 // 🔹 Har kuni qo‘shilgan oylik yozuvi uchun kichik schema
 const salaryLogSchema = new mongoose.Schema(
   {
-    date: { type: Date, required: true }, // Sana
-    hours: { type: Number, required: true }, // Necha soat dars o‘tilgan
-    amount: { type: Number, required: true }, // Shu kunda qo‘shilgan summa
+    date: { type: Date, required: true },
+    hours: { type: Number, required: true },
+    amount: { type: Number, required: true },
+
+    paymentType: {
+      type: String,
+      enum: ["naqd", "karta", "bank"],
+      required: true,
+    },
+
     reason: {
       type: String,
-      enum: ["davomat", "manual"], // Qayerdan qo‘shilgan
+      enum: ["davomat", "manual"],
       default: "davomat",
     },
   },
   { _id: false }
 );
+
 
 const salarySchema = new mongoose.Schema(
   {

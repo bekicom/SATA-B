@@ -1,32 +1,51 @@
 const Salary = require("../models/salaryModel");
 const Teacher = require("../models/teacherModel");
 const School = require("../models/schoolModel");
+const Harajat = require("../models/harajatModel");
+const mongoose = require("mongoose");
 const moment = require("moment");
 
-// 💰 Admin tomonidan qo‘lda oylik to‘lash (manual qo‘shish)
+// 💰 Admin tomonidan qo'lda oylik to'lash
 exports.paySalary = async (req, res) => {
   try {
-    const { teacherId, salaryAmount, paymentMonth } = req.body;
+    const { teacherId, salaryAmount, paymentMonth, paymentType } = req.body;
     const { schoolId } = req.user;
 
+    // ✅ To'lov turi validatsiyasi
+    if (!["naqd", "karta", "bank"].includes(paymentType)) {
+      return res.status(400).json({ message: "Noto'g'ri to'lov turi" });
+    }
+
+    // ✅ O'qituvchini topish
     const teacher = await Teacher.findById(teacherId);
     if (!teacher) {
       return res.status(404).json({ message: "O'qituvchi topilmadi" });
     }
 
-    // maktab budgetidan minus qilamiz
-    const school = await School.findByIdAndUpdate(schoolId, {
-      $inc: { budget: -salaryAmount },
-    });
-    if (!school) {
-      return res
-        .status(500)
-        .json({ message: "Maktab budgetini yangilashda xatolik" });
-    }
+    // 💸 Harajat sifatida yozish (to'lov turini map qilish)
+    const paymentTypeMap = {
+      naqd: "naqd",
+      karta: "plastik",
+      bank: "bankshot",
+    };
 
-    // mavjud Salary hujjatini topamiz yoki yangi yaratamiz
+    await Harajat.create({
+      schoolId: new mongoose.Types.ObjectId(schoolId),
+      name: `${teacher.firstName} ${teacher.lastName}`, // ✅ Name qo'shildi
+      categoryTitle: "Oylik to'lovi",
+      summ: salaryAmount,
+      paymentType: paymentTypeMap[paymentType],
+      description: `${paymentMonth} oyi uchun oylik to'lovi`,
+      createdAt: new Date(),
+    });
+
+    // 💰 Salary hujjatiga yozish
     const updated = await Salary.findOneAndUpdate(
-      { teacherId, schoolId, paymentMonth },
+      {
+        teacherId,
+        schoolId: new mongoose.Types.ObjectId(schoolId),
+        paymentMonth,
+      },
       {
         $inc: { salaryAmount },
         $setOnInsert: {
@@ -35,8 +54,9 @@ exports.paySalary = async (req, res) => {
         $push: {
           logs: {
             date: new Date(),
-            hours: 0, // manual bo‘lgani uchun soat emas
+            hours: 0,
             amount: salaryAmount,
+            paymentType,
             reason: "manual",
           },
         },
@@ -44,19 +64,21 @@ exports.paySalary = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    res.status(201).json(updated);
+    res.status(201).json({
+      message: "Oylik muvaffaqiyatli to'landi",
+      data: updated,
+    });
   } catch (err) {
     console.error("paySalary xatolik:", err);
     res.status(500).json({ message: "Xatolik yuz berdi" });
   }
 };
 
-// 📊 Oy bo‘yicha umumiy oylik hisobot
+// 📊 Oy bo'yicha umumiy oylik
 exports.getMonthlySalarySummary = async (req, res) => {
   try {
     const { schoolId } = req.user;
 
-    // Aggregation: paymentMonth bo‘yicha yig‘indi
     const result = await Salary.aggregate([
       { $match: { schoolId: new mongoose.Types.ObjectId(schoolId) } },
       {
@@ -80,7 +102,7 @@ exports.getMonthlySalarySummary = async (req, res) => {
   }
 };
 
-// 📥 Barcha oyliklarni olish
+// 📥 Barcha oyliklar
 exports.getSalary = async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -92,7 +114,7 @@ exports.getSalary = async (req, res) => {
   }
 };
 
-// 🔄 O‘qituvchilar almashuvi (darsni boshqa o‘qituvchi o‘tib bersa)
+// 🔄 O'qituvchi almashtirish
 exports.createExchangeLesson = async (req, res) => {
   try {
     const { sickTeacherId, teachingTeacherId, lessonCount, month, createdAt } =
@@ -111,6 +133,7 @@ exports.createExchangeLesson = async (req, res) => {
       extra_charge: -lessonCount * sickTeacher.price,
       createdAt,
     });
+
     teachingTeacher.exchange_classes.push({
       lesson_quantity: lessonCount,
       month,
@@ -140,24 +163,24 @@ exports.updateSalary = async (req, res) => {
     }
 
     if (salary.schoolId.toString() !== schoolId) {
-      return res.status(403).json({ message: "Sizga ruxsat yo'q" });
+      return res.status(403).json({ message: "Ruxsat yo'q" });
     }
 
-    // faqat umumiy summani yangilaymiz (logs tarixini o‘zgartirmaymiz)
     salary.paymentMonth = paymentMonth;
     salary.salaryAmount = salaryAmount;
     await salary.save();
 
-    res
-      .status(201)
-      .json({ message: "To'lov muvaffaqiyatli o'zgartirildi", salary });
+    res.status(200).json({
+      message: "To'lov muvaffaqiyatli o'zgartirildi",
+      salary,
+    });
   } catch (err) {
     console.error("updateSalary xatolik:", err);
     res.status(500).json({ message: "Xatolik yuz berdi" });
   }
 };
 
-// 📌 Davomat yozish (masalan, darsga kelgan o‘qituvchi uchun)
+// 📌 Davomat asosida oylik yozish
 exports.addAttendanceSalary = async (req, res) => {
   try {
     const { teacherId, days, hours, paymentMonth } = req.body;
@@ -168,18 +191,20 @@ exports.addAttendanceSalary = async (req, res) => {
       return res.status(404).json({ message: "O'qituvchi topilmadi" });
     }
 
-    // hisoblash
     let earned = 0;
     if (hours) {
       earned = hours * teacher.price;
     } else if (days) {
-      const hoursPerDay = (teacher.hour || 0) / 5; // haftasiga 5 kun
+      const hoursPerDay = (teacher.hour || 0) / 5;
       earned = days * hoursPerDay * teacher.price;
     }
 
-    // Salary hujjatini yangilash
     const updated = await Salary.findOneAndUpdate(
-      { teacherId, schoolId, paymentMonth },
+      {
+        teacherId,
+        schoolId: new mongoose.Types.ObjectId(schoolId),
+        paymentMonth,
+      },
       {
         $inc: { salaryAmount: earned },
         $setOnInsert: {
@@ -191,6 +216,7 @@ exports.addAttendanceSalary = async (req, res) => {
             days: days || 0,
             hours: hours || 0,
             amount: earned,
+            paymentType: "karta", // 🟢 davomat default karta
             reason: "davomat",
           },
         },
