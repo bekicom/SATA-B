@@ -11,7 +11,10 @@ const {
   getTodayLessonsForChildren,
   getChildrenExamResults,
   getChildrenDebts,
-  getChildHomework, // 🟢 YANGI
+  getChildHomework,
+  getWeeklyLessonsForChildren,
+  getChildHomeworksForPeriod,
+  getChildDailyGrades, // 🟢 YANGI: Kunlik baholar
 } = require("../controllers/parentController");
 
 const {
@@ -20,50 +23,86 @@ const {
 
 // === ROUTERLAR ===
 
-// 🔐 Login — token olish
+// 🔐 AUTHENTICATION
 router.post("/login", parentLogin);
 
-// 👨‍👩‍👧 Farzandlar ro'yxati
+// 👨‍👩‍👧 PARENT & CHILDREN INFO
 router.get("/me", parentAuth, getMyChildren);
 router.get("/children", parentAuth, getMyChildren);
 
-// 📘 Baholar
-router.get("/grades/:studentId", parentAuth, getChildGrades);
+// 📚 LESSONS & SCHEDULE
+router.get("/today-lessons", parentAuth, getTodayLessonsForChildren); // Bugungi darslar
+router.get("/weekly-lessons", parentAuth, getWeeklyLessonsForChildren); // Haftalik darslar
 
-// 📆 Bugungi darslar
-router.get("/today-lessons", parentAuth, getTodayLessonsForChildren);
+// 📚 HOMEWORK
+router.get("/homework/:studentId", parentAuth, getChildHomework); // Barcha uyga vazifalar
+router.get(
+  "/homeworks-period/:studentId",
+  parentAuth,
+  getChildHomeworksForPeriod
+); // Davr uchun vazifalar
 
-// 💰 To'lovlar
-router.get("/payments", parentAuth, getChildrenPayments);
+// 📊 GRADES
+router.get("/grades/:studentId", parentAuth, getChildGrades); // Baholar (eski)
+router.get("/daily-grades/:studentId", parentAuth, getChildDailyGrades); // Kunlik baholar (yangi)
 
-// 🟢 Qarzdorliklar
-router.get("/debts", parentAuth, getChildrenDebts);
+// 💰 PAYMENTS & FINANCE
+router.get("/payments", parentAuth, getChildrenPayments); // To'lovlar
+router.get("/debts", parentAuth, getChildrenDebts); // Qarzdorliklar
 
-// 🧾 Imtihon natijalari
-router.get("/exam-results", parentAuth, getChildrenExamResults);
+// 🧾 EXAMS
+router.get("/exam-results", parentAuth, getChildrenExamResults); // Imtihon natijalari
 
-// 🏠 🟢 Uyga vazifalar
-router.get("/homework/:studentId", parentAuth, getChildHomework);
+// 📈 OVERVIEW
+router.get("/overview/:studentId", parentAuth, getStudentOverview); // Umumiy ma'lumot
 
-// 📊 Umumiy overview
-router.get("/overview/:studentId", parentAuth, getStudentOverview);
+// ================================================
+// ✅ OLD PATHS FOR BACKWARD COMPATIBILITY
+// ================================================
 
-// ✅ OTA-ONA uchun himoyalangan yo'llar
+// 👨‍👩‍👧 Farzandlar
 router.get("/parents/children", parentAuth, getMyChildren);
-router.get("/parents/children/grades/:studentId", parentAuth, getChildGrades);
-router.get("/parents/children/payments", parentAuth, getChildrenPayments);
-router.get("/parents/children/debts", parentAuth, getChildrenDebts);
-router.get("/parents/children/exams", parentAuth, getChildrenExamResults);
+
+// 📚 Darslar
 router.get(
   "/parents/children/today-lessons",
   parentAuth,
   getTodayLessonsForChildren
 );
 router.get(
+  "/parents/children/weekly-lessons",
+  parentAuth,
+  getWeeklyLessonsForChildren
+);
+
+// 📚 Uyga vazifalar
+router.get(
   "/parents/children/homework/:studentId",
   parentAuth,
   getChildHomework
-); // 🟢 YANGI
+);
+router.get(
+  "/parents/children/homeworks-period/:studentId",
+  parentAuth,
+  getChildHomeworksForPeriod
+);
+
+// 📊 Baholar
+router.get("/parents/children/grades/:studentId", parentAuth, getChildGrades);
+router.get(
+  "/parents/children/daily-grades/:studentId",
+  parentAuth,
+  getChildDailyGrades
+);
+
+// 💰 Moliya
+router.get("/parents/children/payments", parentAuth, getChildrenPayments);
+router.get("/parents/children/debts", parentAuth, getChildrenDebts);
+
+// 🧾 Imtihonlar
+router.get("/parents/children/exams", parentAuth, getChildrenExamResults);
+
+// 📈 Umumiy
 router.get("/parents/overview/:studentId", parentAuth, getStudentOverview);
 
 module.exports = router;
