@@ -118,6 +118,12 @@ const { getTeacherJournal } = require("../controllers/journalController");
 const {
   getStudentOverview,
 } = require("../controllers/parentOverviewController");
+// ---------- Quarters ----------
+const {
+  setSchoolQuarters,
+  getSchoolQuarters,
+} = require("../controllers/quarter.controller");
+
 
 // ================= Middleware ================= //
 const auth = require("../middlewares/authMiddleware");
@@ -250,5 +256,14 @@ router.get("/session/:sessionId", auth, getResultsBySession);
 
 // ---------- Journals ----------
 router.get("/teacher/journal", auth, getTeacherJournal);
+
+// ---------- Quarters (Choraklar) ----------
+
+// Admin / School choraklarni belgilaydi
+router.post("/quarters/set", auth, setSchoolQuarters);
+
+// Maktab choraklarini olish (kerak bo‘lsa frontend uchun)
+router.get("/quarters/:schoolId", auth, getSchoolQuarters);
+
 
 module.exports = router;
