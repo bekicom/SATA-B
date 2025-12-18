@@ -12,6 +12,7 @@ const {
   getChildrenExamResults,
   getChildrenDebts,
   getChildHomework, // 🟢 YANGI
+  getLessonsAndHomeworksByDateForChildren,
 } = require("../controllers/parentController");
 
 const {
@@ -32,6 +33,11 @@ router.get("/grades/:studentId", parentAuth, getChildGrades);
 
 // 📆 Bugungi darslar
 router.get("/today-lessons", parentAuth, getTodayLessonsForChildren);
+router.get(
+  "/parents/children/lessons-homeworks",
+  parentAuth,
+  getLessonsAndHomeworksByDateForChildren
+);
 
 // 💰 To'lovlar
 router.get("/payments", parentAuth, getChildrenPayments);

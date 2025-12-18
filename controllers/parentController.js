@@ -243,6 +243,130 @@ exports.getTodayLessonsForChildren = async (req, res) => {
 };
 
 
+// ✅ Ota-ona uchun: tanlangan sana bo‘yicha farzandlarning darslari + o‘sha kundagi uyga vazifalar
+exports.getLessonsAndHomeworksByDateForChildren = async (req, res) => {
+  try {
+    const { guardianPhoneNumber } = req.user;
+    const { date } = req.query;
+
+    if (!guardianPhoneNumber) {
+      return res
+        .status(400)
+        .json({ message: "Ota-ona telefon raqami topilmadi" });
+    }
+
+    const children = await Student.find({ guardianPhoneNumber })
+      .populate("groupId", "name number")
+      .lean();
+
+    if (!children.length) {
+      return res.json({ message: "Farzandlar topilmadi", data: [] });
+    }
+
+    // Sana
+    const selectedDate = date ? new Date(date) : new Date();
+    if (isNaN(selectedDate.getTime())) {
+      return res.status(400).json({ message: "Noto'g'ri sana formati" });
+    }
+
+    // Kun boshi/oxiri (Homework ni shu oraliqda filter qilamiz)
+    const startOfDay = new Date(selectedDate);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(selectedDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Haftaning kuni
+    const days = [
+      "yakshanba",
+      "dushanba",
+      "seshanba",
+      "chorshanba",
+      "payshanba",
+      "juma",
+      "shanba",
+    ];
+    const dayName = days[selectedDate.getDay()];
+
+    const result = [];
+
+    for (const child of children) {
+      // 1) O‘sha kundagi dars jadvali
+      const lessons = await LessonSchedule.find({
+        groupId: child.groupId?._id,
+        day: dayName,
+      })
+        .populate("subjectId", "name")
+        .populate("teacherId", "firstName lastName")
+        .sort({ lessonNumber: 1 })
+        .lean();
+
+      const lessonIds = lessons.map((l) => l._id);
+
+      // 2) Faqat o‘sha kundagi Homework (lessonId + createdAt filter)
+      const homeworks = lessonIds.length
+        ? await Homework.find({
+            lessonId: { $in: lessonIds },
+            createdAt: { $gte: startOfDay, $lte: endOfDay },
+          })
+            .populate("subjectId", "name")
+            .populate("teacherId", "firstName lastName")
+            .sort({ createdAt: -1 })
+            .lean()
+        : [];
+
+      // 3) Homeworklarni lesson bo‘yicha guruhlab qo‘yamiz
+      const hwMap = new Map(); // key: lessonId -> homeworks[]
+      for (const hw of homeworks) {
+        const key = hw.lessonId?.toString();
+        if (!key) continue;
+        if (!hwMap.has(key)) hwMap.set(key, []);
+        hwMap.get(key).push({
+          id: hw._id,
+          title: hw.title,
+          description: hw.description,
+          subject: hw.subjectId?.name || "Noma'lum",
+          teacher: hw.teacherId
+            ? `${hw.teacherId.firstName} ${hw.teacherId.lastName}`
+            : "Noma'lum",
+          assignedDate: hw.createdAt,
+        });
+      }
+
+      // 4) Lesson + Homework birlashtiramiz
+      const lessonsWithHomework = lessons.map((lesson) => ({
+        subject: lesson.subjectId?.name || "Noma'lum",
+        lessonNumber: lesson.lessonNumber,
+        teacher: lesson.teacherId
+          ? `${lesson.teacherId.firstName} ${lesson.teacherId.lastName}`
+          : "Noma'lum",
+        homeworks: hwMap.get(lesson._id.toString()) || [],
+      }));
+
+      result.push({
+        student: `${child.firstName} ${child.lastName}`,
+        group: child.groupId
+          ? `${child.groupId.number}-${child.groupId.name}`
+          : null,
+        lessons: lessonsWithHomework,
+      });
+    }
+
+    return res.json({
+      message: "Farzand darslari va (tanlangan kun) uyga vazifalari",
+      date: selectedDate.toISOString().split("T")[0],
+      day: dayName,
+      data: result,
+    });
+  } catch (error) {
+    console.error("getLessonsAndHomeworksByDateForChildren error:", error);
+    return res
+      .status(500)
+      .json({ message: "Server xatosi", error: error.message });
+  }
+};
+
+
 exports.getChildrenPayments = async (req, res) => {
   try {
     const { guardianPhoneNumber } = req.user;
