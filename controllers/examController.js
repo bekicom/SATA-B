@@ -3,70 +3,71 @@ const ExamResult = require("../models/examResultModel");
 const Student = require("../models/studentModel");
 const Group = require("../models/groupModel");
 const Subject = require("../models/subjectModel");
+const Quarter = require("../models/quarterModel");
+// helper: type normalize (xohlasangiz)
+const normalizeType = (t) => {
+  // Frontend monthly/quarterly/yearly yuborsa ham ishlasin desangiz:
+  if (t === "monthly") return "Oylik";
+  if (t === "quarterly") return "Choraklik";
+  if (t === "yearly") return "Yillik";
+  return t; // Oylik/Choraklik/Yillik bo‘lsa shu qaytadi
+};
 
-// === 1) Yangi session yaratish ===
+// === Yangi session yaratish ===
 exports.createSession = async (req, res) => {
   try {
-    const { type, year, month, quarter, groupId, subjectId, maxScore } =
-      req.body;
+    let { type, year, month, quarter, groupId, subjectId, maxScore } = req.body;
 
-    if (type === "monthly" && !month) {
+    // frontend monthly/quarterly yuborsa ham ishlasin
+    if (type === "monthly") type = "Oylik";
+    if (type === "quarterly") type = "Choraklik";
+    if (type === "yearly") type = "Yillik";
+
+    if (type === "Oylik" && !month)
       return res.status(400).json({ message: "Oy tanlanishi shart" });
-    }
-    if (type === "quarterly" && !quarter) {
+
+    if (type === "Choraklik" && !quarter)
       return res.status(400).json({ message: "Chorak tanlanishi shart" });
+
+    // ✅ Chorakni DB dan tekshiramiz
+    let quarterDoc = null;
+    if (type === "Choraklik") {
+      quarterDoc = await Quarter.findOne({
+        schoolId: req.user.schoolId,
+        number: Number(quarter),
+        isActive: true,
+      });
+
+      if (!quarterDoc) {
+        return res.status(404).json({
+          message: "Bu chorak maktab tomonidan belgilanmagan",
+        });
+      }
     }
 
-    // Guruh va fan tekshiruv
-    const group = await Group.findById(groupId);
-    if (!group) return res.status(404).json({ message: "Guruh topilmadi" });
-
-    const subject = await Subject.findById(subjectId);
-    if (!subject) return res.status(404).json({ message: "Fan topilmadi" });
-
-    // Session yaratish
     const session = await ExamSession.create({
-      schoolId: req.user.schoolId, // token’dan keladi
+      schoolId: req.user.schoolId,
       type,
-      year,
-      month: month ?? null,
-      quarter: quarter ?? null,
+      year: Number(year),
+
+      month: type === "Oylik" ? Number(month) : null,
+      quarter: type === "Choraklik" ? Number(quarter) : null, // optional
+      quarterId: type === "Choraklik" ? quarterDoc._id : null, // ✅ asosiy bog‘lanish
+
       groupId,
       subjectId,
       maxScore: maxScore ?? 100,
       createdBy: req.user.teacherId,
     });
 
-    // ✅ Studentlarga 0 baho yozib qo‘yish
-    const students = await Student.find({ groupId });
-    if (students.length > 0) {
-      const bulkOps = students.map((student) => ({
-        updateOne: {
-          filter: { sessionId: session._id, studentId: student._id },
-          update: {
-            $setOnInsert: {
-              sessionId: session._id,
-              studentId: student._id,
-              subjectId,
-              score: 0, // boshlang‘ich baho
-              createdBy: req.user.teacherId,
-            },
-          },
-          upsert: true,
-        },
-      }));
-
-      await ExamResult.bulkWrite(bulkOps);
-    }
-
     res.status(201).json({
-      message: "Session yaratildi va barcha studentlarga 0 baho qo‘yildi",
+      message: "Session yaratildi",
       session,
     });
   } catch (err) {
     if (err.code === 11000) {
       return res.status(409).json({
-        message: "Bu davr/fan/guruh uchun allaqachon session yaratilgan",
+        message: "Bu chorak/fan/guruh uchun session allaqachon mavjud",
       });
     }
     res.status(500).json({
@@ -76,18 +77,17 @@ exports.createSession = async (req, res) => {
   }
 };
 
-
-
 // === 2) Session bo‘yicha o‘quvchilar ro‘yxati ===
 exports.getSessionStudents = async (req, res) => {
   try {
     const { sessionId } = req.params;
+
     const session = await ExamSession.findOne({
       _id: sessionId,
       schoolId: req.user.schoolId,
     })
       .populate("groupId", "name students")
-      .populate("subjectId", "title");
+      .populate("subjectId", "title name"); // subject modelingiz qaysi field ishlatsa
 
     if (!session) return res.status(404).json({ message: "Session topilmadi" });
 
@@ -105,7 +105,7 @@ exports.getSessionStudents = async (req, res) => {
       fullName: [st.lastName, st.firstName, st.middleName]
         .filter(Boolean)
         .join(" "),
-      score: map.get(String(st._id)) ?? null,
+      score: map.get(String(st._id)) ?? 0, // siz 0 yaratgansiz -> default 0
     }));
 
     res.json({
@@ -116,7 +116,7 @@ exports.getSessionStudents = async (req, res) => {
         month: session.month,
         quarter: session.quarter,
         groupName: session.groupId.name,
-        subjectTitle: session.subjectId.title,
+        subjectTitle: session.subjectId.title || session.subjectId.name,
         maxScore: session.maxScore,
         isLocked: session.isLocked,
       },
@@ -129,44 +129,60 @@ exports.getSessionStudents = async (req, res) => {
   }
 };
 
-// === 3) Natijalarni bulk qo‘shish/yangi qilish ===
+// === 3) Natijalarni bulk qo‘shish/yangi qilish (TEZ variant) ===
 exports.bulkUpsertResults = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const session = await ExamSession.findById(sessionId);
+
+    const session = await ExamSession.findOne({
+      _id: sessionId,
+      schoolId: req.user.schoolId,
+    });
     if (!session) return res.status(404).json({ message: "Session topilmadi" });
     if (session.isLocked)
       return res.status(423).json({ message: "Session locked" });
 
     const max = session.maxScore ?? 100;
-    let created = 0,
-      updated = 0;
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
 
-    for (const item of req.body.items) {
-      if (item.score > max) continue;
+    const ops = [];
+    for (const item of items) {
+      if (!item?.studentId) continue;
 
-      const existing = await ExamResult.findOne({
-        sessionId,
-        studentId: item.studentId,
+      const score = Number(item.score);
+      if (Number.isNaN(score)) continue;
+      if (score > max) continue;
+      if (score < 0) continue;
+
+      ops.push({
+        updateOne: {
+          filter: { sessionId, studentId: item.studentId },
+          update: {
+            $set: {
+              score,
+              comment: item.comment ?? null,
+              updatedBy: req.user.teacherId,
+            },
+            $setOnInsert: {
+              schoolId: req.user.schoolId,
+              sessionId,
+              studentId: item.studentId,
+              subjectId: session.subjectId,
+              createdBy: req.user.teacherId,
+            },
+          },
+          upsert: true,
+        },
       });
-      if (existing) {
-        existing.score = item.score;
-        existing.comment = item.comment ?? existing.comment;
-        existing.updatedBy = req.user._id;
-        await existing.save();
-        updated++;
-      } else {
-        await ExamResult.create({
-          schoolId: req.user.schoolId,
-          sessionId,
-          studentId: item.studentId,
-          score: item.score,
-          comment: item.comment || null,
-          createdBy: req.user._id,
-        });
-        created++;
-      }
     }
+
+    if (ops.length === 0) return res.json({ created: 0, updated: 0 });
+
+    const r = await ExamResult.bulkWrite(ops);
+
+    // bulkWrite aniq created/updated ni turlicha qaytaradi, shunga yaqin hisob:
+    const created = r.upsertedCount || 0;
+    const updated = r.modifiedCount || 0;
 
     res.json({ created, updated });
   } catch (err) {
@@ -184,7 +200,7 @@ exports.toggleLock = async (req, res) => {
 
     const session = await ExamSession.findOneAndUpdate(
       { _id: sessionId, schoolId: req.user.schoolId },
-      { $set: { isLocked } },
+      { $set: { isLocked: Boolean(isLocked) } },
       { new: true }
     );
 
@@ -199,43 +215,47 @@ exports.toggleLock = async (req, res) => {
 // === 5) Ota-ona uchun farzand natijalari ===
 exports.getMyChildrenResults = async (req, res) => {
   try {
-    const childIds = req.user.childrenIds; // parentAuthMiddleware qo‘yadi
+    const childIds = req.user.childrenIds;
+
     const results = await ExamResult.find({
       schoolId: req.user.schoolId,
       studentId: { $in: childIds },
     })
-      .populate("sessionId", "type year month quarter subjectId groupId")
-      .populate("sessionId.subjectId", "title")
+      .populate(
+        "sessionId",
+        "type year month quarter subjectId groupId maxScore"
+      )
+      .populate("sessionId.subjectId", "title name")
       .populate("sessionId.groupId", "name");
 
     res.json(results);
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        message: "Farzand natijalarini olishda xato",
-        error: err.message,
-      });
+    res.status(500).json({
+      message: "Farzand natijalarini olishda xato",
+      error: err.message,
+    });
   }
 };
 
-// === 6) Barcha imtihon sessiyalarini olish ===
 exports.getAllSessions = async (req, res) => {
   try {
-    const { groupId, subjectId, year, type, month, quarter } = req.query;
+    let { groupId, subjectId, year, type, month, quarter } = req.query;
 
-    // Filtr shartlari
+    type = type ? normalizeType(type) : undefined;
+
     const filter = { schoolId: req.user.schoolId };
     if (groupId) filter.groupId = groupId;
     if (subjectId) filter.subjectId = subjectId;
     if (year) filter.year = Number(year);
     if (type) filter.type = type;
+
+    // type ga mos filtr
     if (month) filter.month = Number(month);
     if (quarter) filter.quarter = Number(quarter);
 
     const sessions = await ExamSession.find(filter)
       .populate("groupId", "name")
-      .populate("subjectId", "_id name") // ✅ id va title ikkalasi
+      .populate("subjectId", "_id title name") // qaysi field bo‘lsa
       .populate("createdBy", "firstName lastName")
       .sort({ createdAt: -1 });
 
