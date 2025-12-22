@@ -152,3 +152,68 @@ exports.updateResult = async (req, res) => {
     });
   }
 };
+
+// GET /parent/children/:id/exam-results
+exports.getChildExamResults = async (req, res) => {
+  try {
+    const { id } = req.params; // studentId
+    const { guardianPhoneNumber } = req.user; // parentAuth dan
+
+    // 1) Student parentniki ekanini tekshirish
+    const student = await Student.findOne({ _id: id, guardianPhoneNumber }).select(
+      "firstName lastName groupId"
+    );
+
+    if (!student) {
+      return res.status(403).json({
+        message: "Bu farzand sizga tegishli emas",
+        variant: "warning",
+      });
+    }
+
+    // 2) ExamResult larni olish
+    const results = await ExamResult.find({ studentId: id })
+      .sort({ createdAt: -1 })
+      .populate("subjectId", "name")
+      .populate({
+        path: "sessionId",
+        select: "title date groupId subjectId quarterId",
+        populate: [
+          { path: "groupId", select: "name title" },
+          { path: "quarterId", select: "name title number" },
+          { path: "subjectId", select: "name" },
+        ],
+      });
+
+    // 3) Response format (frontendga qulay)
+    const innerData = results.map((r) => ({
+      _id: r._id,
+      score: r.score ?? null,
+      subject: r.subjectId?.name || r.sessionId?.subjectId?.name || null,
+      session: r.sessionId
+        ? {
+            _id: r.sessionId._id,
+            title: r.sessionId.title || null,
+            date: r.sessionId.date || null,
+            group: r.sessionId.groupId?.name || r.sessionId.groupId?.title || null,
+            quarter: r.sessionId.quarterId || null,
+          }
+        : null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+
+    return res.json({
+      message: "Farzand imtihon natijalari",
+      variant: "success",
+      student,
+      innerData,
+    });
+  } catch (err) {
+    console.error("getChildExamResults error:", err);
+    return res.status(500).json({
+      message: "Farzand imtihon natijalarini olishda xato",
+      error: err.message,
+    });
+  }
+};

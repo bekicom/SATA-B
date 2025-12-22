@@ -1189,3 +1189,80 @@ exports.getTodayLessonsForChildren = async (req, res) => {
     res.status(500).json({ message: "Server xatosi", error: error.message });
   }
 };
+
+
+
+// Parent: farzand imtihon baholari (session bilan)
+exports.getChildExamResults = async (req, res) => {
+  try {
+    const { id } = req.params; // studentId
+    const { guardianPhoneNumber, schoolId } = req.user; // parentAuth dan keladi
+
+    // 1) Student ota-onaga tegishlimi?
+    const student = await Student.findOne({ _id: id, guardianPhoneNumber }).select(
+      "_id firstName lastName"
+    );
+    if (!student) {
+      return res.status(403).json({
+        message: "Bu farzand sizga tegishli emas",
+        variant: "warning",
+      });
+    }
+
+    // 2) ExamResult larni olish + session ma'lumotlari
+    const results = await ExamResult.find({
+      studentId: id,
+      schoolId, // xavfsizlik uchun
+    })
+      .populate({
+        path: "sessionId",
+        select: "type year month quarter maxScore groupId subjectId quarterId createdAt",
+        populate: [
+          { path: "groupId", select: "name" },
+          { path: "subjectId", select: "title name" },
+          { path: "quarterId", select: "number startDate endDate" }, // agar qo‘shgan bo‘lsangiz
+        ],
+      })
+      .sort({ createdAt: -1 });
+
+    // 3) Response format (frontend uchun chiroyli)
+    const data = results.map((r) => ({
+      resultId: r._id,
+      score: r.score,
+      comment: r.comment ?? null,
+      session: r.sessionId
+        ? {
+            sessionId: r.sessionId._id,
+            type: r.sessionId.type,
+            year: r.sessionId.year,
+            month: r.sessionId.month ?? null,
+            quarter: r.sessionId.quarter ?? null,
+            maxScore: r.sessionId.maxScore ?? 100,
+            group: r.sessionId.groupId?.name ?? null,
+            subject: r.sessionId.subjectId?.title ?? r.sessionId.subjectId?.name ?? null,
+            quarterInfo: r.sessionId.quarterId
+              ? {
+                  number: r.sessionId.quarterId.number,
+                  startDate: r.sessionId.quarterId.startDate,
+                  endDate: r.sessionId.quarterId.endDate,
+                }
+              : null,
+          }
+        : null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+
+    res.json({
+      message: "Farzand imtihon natijalari",
+      variant: "success",
+      student,
+      innerData: data,
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Farzand imtihon natijalarini olishda xato",
+      error: err.message,
+    });
+  }
+};

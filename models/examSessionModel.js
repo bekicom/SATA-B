@@ -45,6 +45,11 @@ const examSessionSchema = new mongoose.Schema(
       index: true,
     },
 
+    quarterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Quarter",
+      default: null,
+    },
     isLocked: { type: Boolean, default: false },
   },
   { timestamps: true }
