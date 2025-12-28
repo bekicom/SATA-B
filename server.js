@@ -29,7 +29,8 @@ app.use(express.json());
 // ✅ Authsiz marshrutlar
 app.use("/api/davomat/teacher", routes); // authsiz
 // Authsiz marshrutlar
-app.use("/api/", parentRoutes); // faqat ota-onalar uchun
+app.use("/api/parent", parentRoutes);
+// faqat ota-onalar uchun
 
 // ✅ Qolgan barcha marshrutlar auth bilan
 app.use("/api", auth, routes);
