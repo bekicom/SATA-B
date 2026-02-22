@@ -12,8 +12,8 @@ connectDB();
 // ✅ Ruxsat berilgan domenlar
 const allowedOrigins = [
   "https://sata-school-f.vercel.app",
+  "https://sata-f.vercel.app",
   "http://localhost:3000",
-  "https://7f661wm9-8030.euw.devtunnels.ms/api",
 ];
 app.use(
   cors({
