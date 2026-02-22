@@ -12,32 +12,19 @@ const app = express();
 connectDB();
 
 /* =========================
-   ✅ RUXSAT BERILGAN DOMENLAR
+   ✅ CORS
 ========================= */
 
-const allowedOrigins = [
-  "https://sata-school-f.vercel.app",
-  "https://sata-f.vercel.app",
-  "http://localhost:3000",
-];
-
-// 🔥 Dynamic CORS
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // postman yoki server requestlar
-
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("CORS ruxsat berilmadi"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    origin: true, // barcha originlarga ruxsat (test uchun)
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
+
+app.options("*", cors()); // 🔥 PRELIGHT MUHIM
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -69,7 +56,7 @@ app.use((err, req, res, next) => {
    SERVER
 ========================= */
 
-const PORT = process.env.PORT || 8057;
+const PORT = process.env.PORT || 8059;
 
 const server = app.listen(PORT, () => {
   console.log(`✅ Server ${PORT} portda ishga tushdi`);
@@ -110,21 +97,14 @@ async function sendAttendanceToAPI(eventData) {
 }
 
 wss.on("connection", (ws) => {
-  console.log("🟢 WebSocket client ulandi");
-
   ws.on("message", (message) => {
     try {
       const eventData = JSON.parse(message.toString());
-
       if (eventData.employeeNo) {
         sendAttendanceToAPI(eventData);
       }
     } catch (error) {
       console.error("❌ WS xatosi:", error.message);
     }
-  });
-
-  ws.on("close", () => {
-    console.log("🔴 Client uzildi");
   });
 });
