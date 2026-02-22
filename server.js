@@ -3,34 +3,18 @@ const express = require("express");
 const connectDB = require("./config/db");
 const routes = require("./routes/index");
 const auth = require("./middlewares/authMiddleware");
-const cors = require("cors");
 const moment = require("moment-timezone");
 const { WebSocketServer } = require("ws");
 const parentRoutes = require("./routes/parentRoutes");
+
 const app = express();
 connectDB();
-// ✅ Ruxsat berilgan domenlar
-const allowedOrigins = [
-  "https://sata-school-f.vercel.app",
-  "https://sata-f.vercel.app",
-  "http://localhost:3000",
-];
-app.use(
-  cors({
-    origin: "*", // Hamma domenlarga ruxsat
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    // ⚠️ credentials bilan ishlashda origin '*' ishlamaydi
-    // credentials: true, // agar cookie yuborilishini xohlasangiz, undan foydalanmang
-  })
-);
 
 app.use(express.json());
 
 // ✅ Authsiz marshrutlar
-app.use("/api/davomat/teacher", routes); // authsiz
-// Authsiz marshrutlar
+app.use("/api/davomat/teacher", routes);
 app.use("/api/parent", parentRoutes);
-// faqat ota-onalar uchun
 
 // ✅ Qolgan barcha marshrutlar auth bilan
 app.use("/api", auth, routes);
@@ -42,14 +26,13 @@ const server = app.listen(PORT, () => {
 });
 server.setTimeout(60000);
 
-//
 // =============================
 //  WebSocket qismi
 // =============================
 const wss = new WebSocketServer({ server });
 
 async function sendAttendanceToAPI(eventData) {
-  const fetch = (await import("node-fetch")).default; // ⬅ Dynamic import
+  const fetch = (await import("node-fetch")).default;
 
   const payload = {
     employeeNo: eventData.employeeNo,
@@ -62,7 +45,7 @@ async function sendAttendanceToAPI(eventData) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.API_TOKEN}`, // token kerak bo‘lsa
+        Authorization: `Bearer ${process.env.API_TOKEN}`,
       },
       body: JSON.stringify(payload),
     });
