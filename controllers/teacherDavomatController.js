@@ -1,19 +1,22 @@
 const TeacherDavomat = require("../models/teacherDavomat");
 const Teacher = require("../models/teacherModel");
-const Salary = require("../models/salaryModel");
 const moment = require("moment-timezone");
 const mongoose = require("mongoose");
 
 exports.addTeacherDavomat = async (req, res) => {
   try {
-    const { teacherId, employeeNo, davomatDate, status, summ } = req.body;
+    const { teacherId, employeeNo, davomatDate, status } = req.body;
     const schoolId = new mongoose.Types.ObjectId(req.user.schoolId);
 
-    // ✅ teacherId yoki employeeNo bilan o'qituvchini topamiz
+    // ==============================
+    // 1️⃣ O‘qituvchini topish
+    // ==============================
     let teacher = null;
+
     if (teacherId) {
       teacher = await Teacher.findOne({ _id: teacherId, schoolId });
     }
+
     if (!teacher && employeeNo) {
       teacher = await Teacher.findOne({ employeeNo, schoolId });
     }
@@ -24,135 +27,133 @@ exports.addTeacherDavomat = async (req, res) => {
 
     const resolvedTeacherId = teacher._id;
 
-    // Sana kaliti
+    // ==============================
+    // 2️⃣ Sana
+    // ==============================
     const baseDate = davomatDate
-      ? moment.tz(davomatDate, ["YYYY-MM-DD", "DD-MM-YYYY"], "Asia/Tashkent")
+      ? moment.tz(davomatDate, "YYYY-MM-DD", "Asia/Tashkent")
       : moment().tz("Asia/Tashkent");
 
     const dateKey = baseDate.format("YYYY-MM-DD");
-    const paymentMonth = baseDate.format("YYYY-MM");
 
-    // ✅ status ni BARCHA formatda to'g'ri parse qilamiz
-    // keldi: true, "true", "keldi"
-    // kelmadi: false, "false", "kelmadi"
-    const davomatStatus =
-      status === true || status === "true" || status === "keldi";
+    let dayDoc = await TeacherDavomat.findOne({ schoolId, dateKey });
 
-    // Shu kunda bu o'qituvchi davomati allaqachon yozilganmi?
-    const dayDoc = await TeacherDavomat.findOne({ schoolId, dateKey });
-    const alreadyExists = (dayDoc?.body || []).some(
+    if (!dayDoc) {
+      dayDoc = await TeacherDavomat.create({
+        schoolId,
+        date: baseDate.startOf("day").toDate(),
+        dateKey,
+        body: [],
+      });
+    }
+
+    const existingEntry = dayDoc.body.find(
       (e) => String(e.teacher_id) === String(resolvedTeacherId),
     );
 
-    if (alreadyExists) {
-      return res.status(409).json({
-        success: false,
-        message: "Bu o'qituvchining davomati bugun allaqachon olingan",
+    const nowMoment = moment.tz("Asia/Tashkent");
+
+    // ==============================
+    // 3️⃣ KELDI
+    // ==============================
+    if (status === "keldi") {
+      if (existingEntry) {
+        return res.status(409).json({
+          success: false,
+          message: "Bugun allaqachon kelgan",
+        });
+      }
+
+      dayDoc.body.push({
+        teacher_id: resolvedTeacherId,
+        employeeNo: teacher.employeeNo,
+        time: nowMoment.format("HH:mm:ss"),
+        status: "keldi",
+        quittedTime: null,
       });
-    }
 
-    // Kun hujjatini yaratish (agar bo'lmasa)
-    await TeacherDavomat.findOneAndUpdate(
-      { schoolId, dateKey },
-      {
-        $setOnInsert: {
-          date: baseDate.clone().startOf("day").toDate(),
-          schoolId,
-          dateKey,
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
+      await dayDoc.save();
 
-    // ✅ Davomatni yozamiz — status ANIQ saqlanadi
-    await TeacherDavomat.findOneAndUpdate(
-      { schoolId, dateKey },
-      {
-        $push: {
-          body: {
-            teacher_id: resolvedTeacherId,
-            employeeNo: teacher.employeeNo,
-            time: davomatStatus
-              ? moment().tz("Asia/Tashkent").format("HH:mm:ss")
-              : null, // ✅ kelmadi bo'lsa vaqt saqlanmaydi
-            status: davomatStatus ? "keldi" : "kelmadi",
-            summ: davomatStatus ? summ || 0 : 0,
-          },
-        },
-      },
-      { new: true },
-    );
-
-    // ✅ Faqat "keldi" bo'lsa oylikka qo'shamiz
-    if (davomatStatus) {
-      const weekday = baseDate.format("dddd").toLowerCase();
-      const kunMap = {
-        monday: "dushanba",
-        tuesday: "seshanba",
-        wednesday: "chorshanba",
-        thursday: "payshanba",
-        friday: "juma",
-        saturday: "shanba",
-        sunday: "yakshanba",
-      };
-
-      const kun = kunMap[weekday] || null;
-
-      if (kun === "yakshanba") {
-        return res.status(201).json({
-          success: true,
-          message: "Yakshanba dam olish kuni — oylikka qo'shilmadi",
-        });
-      }
-
-      const hours = (kun && teacher.schedule?.[kun]) || 0;
-      const amount = summ || hours * teacher.price || 0;
-
-      if (amount > 0) {
-        const exists = await Salary.findOne({
-          teacherId: resolvedTeacherId,
-          schoolId,
-          paymentMonth,
-          "logs.dateKey": dateKey,
-        });
-
-        if (!exists) {
-          await Salary.findOneAndUpdate(
-            { teacherId: resolvedTeacherId, schoolId, paymentMonth },
-            {
-              $inc: { salaryAmount: amount },
-              $setOnInsert: {
-                teacher_fullname: `${teacher.firstName} ${teacher.lastName}`,
-              },
-              $push: {
-                logs: {
-                  date: baseDate.clone().startOf("day").toDate(),
-                  dateKey,
-                  hours,
-                  amount,
-                  reason: "davomat",
-                },
-              },
-            },
-            { upsert: true, new: true },
-          );
-        }
-      }
-
-      return res.status(201).json({
+      return res.json({
         success: true,
-        message: "Keldi — davomat va oylik yozildi",
+        message: "Keldi yozildi",
       });
     }
 
-    // ✅ "Kelmadi" — faqat davomat yozildi, oylikka qo'shilmadi
-    return res.status(201).json({
-      success: true,
-      message: "Kelmadi — davomat yozildi, oylikka qo'shilmadi",
-    });
+    // ==============================
+    // 4️⃣ KETDI
+    // ==============================
+    if (status === "leave") {
+      if (!existingEntry || !existingEntry.time) {
+        return res.status(400).json({
+          success: false,
+          message: "Avval kelish belgilanmagan",
+        });
+      }
+
+      if (existingEntry.quittedTime) {
+        return res.status(409).json({
+          success: false,
+          message: "Ketish allaqachon yozilgan",
+        });
+      }
+
+      const arrivalMoment = moment.tz(
+        `${dateKey} ${existingEntry.time}`,
+        "YYYY-MM-DD HH:mm:ss",
+        "Asia/Tashkent",
+      );
+
+      const diffInMinutes = nowMoment.diff(arrivalMoment, "minutes");
+
+      // 🔥 5 minut shart
+      if (diffInMinutes < 5) {
+        return res.status(400).json({
+          success: false,
+          message: "Ketish uchun kamida 5 minut o'tishi kerak",
+        });
+      }
+
+      existingEntry.quittedTime = nowMoment.format("HH:mm:ss");
+      await dayDoc.save();
+
+      return res.json({
+        success: true,
+        message: "Ketish vaqti yozildi",
+      });
+    }
+
+    // ==============================
+    // 5️⃣ KELMADI
+    // ==============================
+    if (status === "kelmadi") {
+      if (existingEntry) {
+        return res.status(409).json({
+          success: false,
+          message: "Bugun allaqachon belgilangan",
+        });
+      }
+
+      dayDoc.body.push({
+        teacher_id: resolvedTeacherId,
+        employeeNo: teacher.employeeNo,
+        time: null,
+        status: "kelmadi",
+        quittedTime: null,
+      });
+
+      await dayDoc.save();
+
+      return res.json({
+        success: true,
+        message: "Kelmadi yozildi",
+      });
+    }
+
+    return res.status(400).json({ message: "Noto'g'ri status" });
   } catch (err) {
-    console.error("Davomat yozishda xato:", err);
-    res.status(500).json({ message: "Xatolik yuz berdi", error: err.message });
+    console.error(err);
+    res.status(500).json({ message: "Server xatosi" });
   }
 };
 

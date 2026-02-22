@@ -25,7 +25,7 @@ const teacherDavomatSchema = new mongoose.Schema(
           required: true,
         },
         employeeNo: { type: String, required: true },
-        time: { type: String, required: true }, // kelish vaqti
+        time: { type: String, required: false }, // kelish vaqti
         quittedTime: { type: String }, // ketish vaqti
         status: {
           type: String,
