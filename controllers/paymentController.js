@@ -161,92 +161,58 @@ exports.getPayments = async (req, res) => {
   try {
     const { schoolId } = req.user;
 
-    const payments = await paymentModel.find({ schoolId });
+    const payments = await paymentModel.find({ schoolId }).lean(); // 🔥 MUHIM
 
-    const school = await schoolModel.findById(schoolId);
-    if (!school) {
-      return res.status(404).json({ message: "School not found" });
+    if (!payments.length) {
+      return res.status(200).json([]);
     }
+
+    // 🔥 barcha student id larni olish
+    const studentIds = [...new Set(payments.map((p) => p.user_id.toString()))];
+
+    // 🔥 bitta query bilan barcha studentlarni olish
+    const students = await studentModel
+      .find({ _id: { $in: studentIds } })
+      .select("firstName lastName groupId monthlyFee")
+      .lean();
+
+    const studentMap = {};
+    students.forEach((s) => {
+      studentMap[s._id.toString()] = s;
+    });
+
     const mergedPayments = {};
 
     for (const payment of payments) {
-      const student = await studentModel.findById(payment.user_id);
+      const student = studentMap[payment.user_id.toString()];
+      if (!student) continue;
 
-      if (!student) {
-        continue;
-      }
+      const key = `${payment.user_id}-${payment.payment_month}`;
 
-      const paymentKey = `${payment.user_id}-${payment.payment_month}`;
-
-      if (!mergedPayments[paymentKey]) {
-        mergedPayments[paymentKey] = {
+      if (!mergedPayments[key]) {
+        mergedPayments[key] = {
           user_id: student._id,
-          user_fullname: student.firstName + " " + student.lastName,
+          user_fullname: `${student.firstName} ${student.lastName}`,
           user_group: student.groupId,
           payment_quantity: payment.payment_quantity,
           payment_month: payment.payment_month,
           schoolId: payment.schoolId,
           payment_type: payment.payment_type,
           createdAt: payment.createdAt,
-          payment_types: [payment.payment_type],
           student_monthlyFee: student.monthlyFee,
         };
       } else {
-        mergedPayments[paymentKey].payment_quantity += payment.payment_quantity;
-        mergedPayments[paymentKey].createdAt =
-          mergedPayments[paymentKey].createdAt > payment.createdAt
-            ? mergedPayments[paymentKey].createdAt
-            : payment.createdAt;
-        mergedPayments[paymentKey].payment_types.push(payment.payment_type);
+        mergedPayments[key].payment_quantity += payment.payment_quantity;
       }
     }
 
-    const mergedPaymentsArray = Object.values(mergedPayments);
-
-    mergedPaymentsArray.forEach((payment) => {
-      const cashCount = payment.payment_types.filter(
-        (type) => type === "cash"
-      ).length;
-      const cardCount = payment.payment_types.filter(
-        (type) => type === "card"
-      ).length;
-      const bankCount = payment.payment_types.filter(
-        (type) => type === "bankshot"
-      ).length;
-
-      const counts = { cash: cashCount, card: cardCount, bankshot: bankCount };
-      const dominantType = Object.keys(counts).reduce((a, b) =>
-        counts[a] > counts[b] ? a : b
-      );
-
-      payment.payment_type = dominantType;
-      delete payment.payment_types;
-    });
-
-    // 🔥 BU FILTERNI O'CHIRISH KERAK - u faqat to'liq to'langanlarni ko'rsatadi
-    // const filteredPayments = [];
-    // for (const payment of mergedPaymentsArray) {
-    //   const studentPayments = await paymentModel.find({
-    //     user_id: payment.user_id,
-    //     payment_month: payment.payment_month,
-    //   });
-    //
-    //   let totalPaid = 0;
-    //   studentPayments.forEach((p) => (totalPaid += p.payment_quantity));
-    //   if (totalPaid >= payment.student_monthlyFee) {
-    //     filteredPayments.push(payment);
-    //   }
-    // }
-
-    // 🔥 BARCHA TO'LOVLARNI QAYTARISH
-    res.status(200).json(mergedPaymentsArray);
+    return res.status(200).json(Object.values(mergedPayments));
   } catch (err) {
-    console.log(err);
-    res
-      .status(500)
-      .json({ message: "Server error occurred", error: err.message });
+    console.error(err);
+    res.status(500).json({ message: "Server error occurred" });
   }
 };
+
 
 exports.getDebts = async (req, res) => {
   try {

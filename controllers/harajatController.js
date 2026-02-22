@@ -129,3 +129,49 @@ exports.getMonthlyExpenseSummary = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+
+
+// ✏️ Harajatni tahrirlash
+exports.updateHarajat = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, comment, summ, paymentType } = req.body;
+    const { schoolId } = req.user;
+
+    const harajat = await harajatModel.findOne({ _id: id, schoolId });
+    if (!harajat) {
+      return res.status(404).json({ message: "Harajat topilmadi" });
+    }
+
+    // Eski summani budjetga qaytaramiz, yangisini ayiramiz
+    if (harajat.paymentType === "naqd" || paymentType === "naqd") {
+      let budgetChange = 0;
+
+      if (harajat.paymentType === "naqd") {
+        budgetChange += harajat.summ; // eskisini qaytaramiz
+      }
+      if (paymentType === "naqd") {
+        budgetChange -= summ; // yangisini ayiramiz
+      }
+
+      await schoolModel.findByIdAndUpdate(schoolId, {
+        $inc: { budget: budgetChange },
+      });
+    }
+
+    const updated = await harajatModel.findByIdAndUpdate(
+      id,
+      { name, comment, summ, paymentType },
+      { new: true }
+    );
+
+    res.status(200).json({
+      message: "Harajat muvaffaqiyatli yangilandi",
+      data: updated,
+    });
+  } catch (err) {
+    console.error("updateHarajat xatolik:", err);
+    res.status(500).json({ message: "Serverda xatolik yuz berdi", error: err.message });
+  }
+};

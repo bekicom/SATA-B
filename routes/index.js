@@ -56,6 +56,7 @@ const {
   createHarajat,
   getHarajat,
   getMonthlyExpenseSummary,
+  updateHarajat,
 } = require("../controllers/harajatController");
 const {
   paySalary,
@@ -64,6 +65,7 @@ const {
   getMonthlySalarySummary,
   updateSalary,
   addAttendanceSalary,
+  updateSalaryLog,
 } = require("../controllers/salaryController");
 const {
   addSubject,
@@ -190,6 +192,7 @@ router.delete("/payments/:id", auth, deletePayment);
 // ---------- Harajat ----------
 router.post("/expenses", createHarajat);
 router.get("/expenses", getHarajat);
+router.put("/expenses/:id", updateHarajat);
 router.get("/expenses/summary", getMonthlyExpenseSummary);
 
 // ---------- Salary ----------
@@ -199,6 +202,7 @@ router.put("/salary", updateSalary);
 router.get("/salary/summary", getMonthlySalarySummary);
 router.post("/salary/exchange", createExchangeLesson);
 router.post("/salary/attendance", addAttendanceSalary);
+router.patch("/salary/log",  updateSalaryLog);
 
 // ---------- Subjects ----------
 router.post("/subjects", addSubject);

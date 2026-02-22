@@ -1,16 +1,22 @@
 const mongoose = require("mongoose");
 
-// 🔹 Har kuni qo‘shilgan oylik yozuvi uchun kichik schema
+// 🔹 Har kuni qo'shilgan oylik yozuvi uchun kichik schema
 const salaryLogSchema = new mongoose.Schema(
   {
     date: { type: Date, required: true },
-    hours: { type: Number, required: true },
+
+    // ✅ Duplicate tekshiruv uchun string kalit ("2026-02-22")
+    dateKey: { type: String, default: null },
+
+    hours: { type: Number, default: 0 },
     amount: { type: Number, required: true },
 
+    // ✅ required: false — davomat logida paymentType bo'lmasligi mumkin
     paymentType: {
       type: String,
-      enum: ["naqd", "karta", "bank"],
-      required: true,
+      enum: ["naqd", "karta", "bank", null],
+      default: null,
+      required: false,
     },
 
     reason: {
@@ -19,9 +25,8 @@ const salaryLogSchema = new mongoose.Schema(
       default: "davomat",
     },
   },
-  { _id: false }
+  { _id: false },
 );
-
 
 const salarySchema = new mongoose.Schema(
   {
@@ -37,7 +42,7 @@ const salarySchema = new mongoose.Schema(
     salaryAmount: {
       type: Number,
       required: true,
-      default: 0, // umumiy yig‘indi
+      default: 0,
     },
     schoolId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -49,17 +54,17 @@ const salarySchema = new mongoose.Schema(
       required: true,
     },
     logs: {
-      type: [salaryLogSchema], // kunlik yozuvlar
+      type: [salaryLogSchema],
       default: [],
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-// 🔎 Bitta o‘qituvchi, bitta maktab, bitta oy uchun bitta hujjat
+// 🔎 Bitta o'qituvchi, bitta maktab, bitta oy uchun bitta hujjat
 salarySchema.index(
   { teacherId: 1, schoolId: 1, paymentMonth: 1 },
-  { unique: true }
+  { unique: true },
 );
 
 module.exports = mongoose.model("Salary", salarySchema);

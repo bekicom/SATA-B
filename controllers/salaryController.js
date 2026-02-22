@@ -180,6 +180,44 @@ exports.updateSalary = async (req, res) => {
   }
 };
 
+
+
+exports.updateSalaryLog = async (req, res) => {
+  try {
+    const { salaryId, logIndex, newAmount } = req.body; // ✅ logId → logIndex
+
+    const { schoolId } = req.user;
+
+    const salary = await Salary.findById(salaryId);
+    if (!salary) {
+      return res.status(404).json({ message: "Salary topilmadi" });
+    }
+
+    if (salary.schoolId.toString() !== schoolId) {
+      return res.status(403).json({ message: "Ruxsat yo'q" });
+    }
+
+    const log = salary.logs[logIndex]; // ✅ .id() o'rniga index bilan
+    if (!log) {
+      return res.status(404).json({ message: "Log topilmadi" });
+    }
+
+    if (log.reason !== "manual") {
+      return res.status(400).json({ message: "Faqat qo'lda to'lovni tahrirlash mumkin" });
+    }
+
+    const oldAmount = log.amount;
+    salary.salaryAmount = salary.salaryAmount - oldAmount + newAmount;
+    salary.logs[logIndex].amount = newAmount;
+
+    await salary.save();
+
+    res.status(200).json({ message: "To'lov muvaffaqiyatli tahrirlandi", salary });
+  } catch (err) {
+    console.error("updateSalaryLog xatolik:", err);
+    res.status(500).json({ message: "Xatolik yuz berdi" });
+  }
+};
 // 📌 Davomat asosida oylik yozish
 exports.addAttendanceSalary = async (req, res) => {
   try {
