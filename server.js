@@ -32,13 +32,13 @@ app.use(express.urlencoded({ extended: true }));
 /* =========================
    ROUTES
 ========================= */
+app.use("/api", auth, routes);
 
 // 🔓 Authsiz marshrutlar
 app.use("/api/davomat/teacher", routes);
 app.use("/api/parent", parentRoutes);
 
 // 🔐 Protected marshrutlar
-app.use("/api", auth, routes);
 
 /* =========================
    ERROR HANDLER
