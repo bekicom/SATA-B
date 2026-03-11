@@ -5,7 +5,17 @@ const mongoose = require("mongoose");
 
 exports.addTeacherDavomat = async (req, res) => {
   try {
-    const { teacherId, employeeNo, davomatDate } = req.body;
+    const {
+      teacherId,
+      employeeNo,
+      davomatDate,
+      scanDateTime,
+      time,
+      arrivedTime,
+      arrivalTime,
+      quittedTime,
+      leaveTime,
+    } = req.body;
     let { status } = req.body;
 
     const schoolId = new mongoose.Types.ObjectId(req.user.schoolId);
@@ -14,6 +24,8 @@ exports.addTeacherDavomat = async (req, res) => {
     status = String(status || "")
       .toLowerCase()
       .trim();
+    if (status === "true") status = "keldi";
+    if (status === "false") status = "kelmadi";
     if (status === "leave") status = "ketdi";
 
     // 1) O'qituvchini topish
@@ -34,11 +46,39 @@ exports.addTeacherDavomat = async (req, res) => {
     const resolvedTeacherId = teacher._id;
 
     // 2) Sana
+    const scanMoment =
+      scanDateTime && moment(scanDateTime).isValid()
+        ? moment(scanDateTime).tz("Asia/Tashkent")
+        : null;
+
     const baseDate = davomatDate
       ? moment.tz(davomatDate, "YYYY-MM-DD", "Asia/Tashkent")
-      : moment().tz("Asia/Tashkent");
+      : scanMoment || moment().tz("Asia/Tashkent");
 
     const dateKey = baseDate.format("YYYY-MM-DD");
+
+    const parseTimeForDate = (rawValue) => {
+      if (!rawValue) return null;
+
+      const parsed = moment.tz(
+        `${dateKey} ${String(rawValue).trim()}`,
+        ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD HH:mm"],
+        "Asia/Tashkent",
+      );
+
+      return parsed.isValid() ? parsed : null;
+    };
+
+    const resolveEventMoment = (preferredValues = []) => {
+      for (const value of preferredValues) {
+        const parsed = parseTimeForDate(value);
+        if (parsed) return parsed;
+      }
+
+      if (scanMoment) return scanMoment.clone();
+
+      return moment().tz("Asia/Tashkent");
+    };
 
     let dayDoc = await TeacherDavomat.findOne({ schoolId, dateKey });
 
@@ -55,7 +95,8 @@ exports.addTeacherDavomat = async (req, res) => {
       (e) => String(e.teacher_id) === String(resolvedTeacherId),
     );
 
-    const nowMoment = moment.tz("Asia/Tashkent");
+    const arrivalMoment = resolveEventMoment([arrivedTime, arrivalTime, time]);
+    const leaveMoment = resolveEventMoment([quittedTime, leaveTime, time]);
 
     // 3) KELDI (1-scan), agar bor bo'lsa va quittedTime yo'q bo'lsa 2-scan => KETDI
     if (status === "keldi") {
@@ -63,7 +104,7 @@ exports.addTeacherDavomat = async (req, res) => {
         dayDoc.body.push({
           teacher_id: resolvedTeacherId,
           employeeNo: teacher.employeeNo,
-          time: nowMoment.format("HH:mm:ss"),
+          time: arrivalMoment.format("HH:mm:ss"),
           status: "keldi",
           quittedTime: null,
         });
@@ -80,7 +121,7 @@ exports.addTeacherDavomat = async (req, res) => {
           "Asia/Tashkent",
         );
 
-        const diffInMinutes = nowMoment.diff(arrivalMoment, "minutes");
+        const diffInMinutes = leaveMoment.diff(arrivalMoment, "minutes");
         if (diffInMinutes < 5) {
           return res.status(400).json({
             success: false,
@@ -88,7 +129,7 @@ exports.addTeacherDavomat = async (req, res) => {
           });
         }
 
-        existingEntry.quittedTime = nowMoment.format("HH:mm:ss");
+        existingEntry.quittedTime = leaveMoment.format("HH:mm:ss");
         existingEntry.status = "ketdi";
 
         await dayDoc.save();
@@ -123,7 +164,7 @@ exports.addTeacherDavomat = async (req, res) => {
         "Asia/Tashkent",
       );
 
-      const diffInMinutes = nowMoment.diff(arrivalMoment, "minutes");
+      const diffInMinutes = leaveMoment.diff(arrivalMoment, "minutes");
       if (diffInMinutes < 5) {
         return res.status(400).json({
           success: false,
@@ -131,7 +172,7 @@ exports.addTeacherDavomat = async (req, res) => {
         });
       }
 
-      existingEntry.quittedTime = nowMoment.format("HH:mm:ss");
+      existingEntry.quittedTime = leaveMoment.format("HH:mm:ss");
       existingEntry.status = "ketdi";
 
       await dayDoc.save();
